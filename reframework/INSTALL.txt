@@ -1,0 +1,74 @@
+Linked Restock — REFramework mod for Monster Hunter Wilds
+=========================================================
+
+Version 0.1.0 (first build; run the probe once — see Notes).
+
+What it does
+------------
+Links an armour build to an item loadout and restocks it automatically.
+Unlike the existing Auto Restock mods, the build is matched on the armour, the
+resolved skills and the charm — the weapon is part of the match only if you let
+it be. With "Ignore weapons" ticked, swapping to your second weapon (or any
+other) does not break the link.
+
+How to use
+----------
+1. In the hub, equip the build you want to link.
+2. Open Insert -> Script Generated UI -> Linked Restock.
+3. Under "New link", pick the item loadout, pick a Match mode (leave it on
+   "inherit" to follow the global checkbox), press "Link current build".
+4. Tick "Quest accepted" and/or "Back in the hub".
+5. Use "Preview" to see exactly what would change, and "Apply" to try it now.
+
+The panel shows what the mod reads: armour pieces, charm, skill count, weapon,
+and the game loadout the build belongs to.
+
+Install
+-------
+1. Install REFramework for MH Wilds (dinput8.dll in the game folder).
+2. Copy linked_restock.lua to:
+     <game>\reframework\autorun\linked_restock.lua
+   Steam path:
+     ...\steamapps\common\MonsterHunterWilds\reframework\autorun\
+3. Open the in-game REFramework menu -> "Script Generated UI" ->
+   "Linked Restock" to confirm it loaded.
+
+Match modes
+-----------
+inherit    follow the global "Ignore weapons" checkbox
+full       armour + skills + weapon
+no_weapon  armour + skills (any weapon)
+gear       armour + charm
+armor      armour pieces only
+
+Options
+-------
+- Ignore weapons: the client's fix. The weapon is not part of the build.
+- Notify missing items: names the items the item box could not cover.
+- On-screen notice: a short line drawn by the mod after each attempt.
+- Default item set: used when no link matches.
+- Fallback by weapon type: set in reframework/data/linked_restock.json
+  ("fallback_by_weapon": {"<weapon type number>": <item set number>}).
+
+Files
+-----
+Links and settings live in reframework/data/linked_restock.json.
+Diagnostics -> "Export links" writes reframework/data/linked_restock_links.json,
+which "Import links" reads back.
+
+Notes
+-----
+- Nothing is created out of thin air: the item box is the hard limit, and any
+  item the box cannot cover is reported, not generated.
+- The mod applies an item set through the game's own call when it can find it,
+  and otherwise tops the pouch up from the item box. Every attempt is verified
+  by reading the pouch back; if nothing changed, the next path runs.
+- First release: run the probe once (tools/loadout_probe.lua -> "Dump
+  everything", in the hub) and keep the JSON files. If the game's item-set call
+  is not found on this build, the top-up path is used and the panel says so
+  under Diagnostics.
+- No hooks. The quest state is polled twice a second. No game files are
+  modified, no network calls, other players are never touched.
+- Reload via REFramework menu -> "Script" -> "Reset scripts".
+- If a game patch renames an internal field, the panel reports the failing read
+  instead of throwing.
