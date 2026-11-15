@@ -350,9 +350,13 @@ mm.playing = true
 mm.active = true
 T.poll()
 eq(T.state.quest_seq, 1, "quest accept is seen")
+eq(T.state.accept_done_seq, -1, "the accept restock waits for the quest to settle")
+check(T.state.accept_pending == true, "accept restock is pending")
+for _ = 1, 70 do T.poll() end
 eq(T.state.accept_done_seq, 1, "the accept trigger fired once")
 T.poll()
 eq(T.state.quest_seq, 1, "no second accept inside the same quest")
+eq(T.state.accept_done_seq, 1, "and no second restock")
 
 -- achieving the quest: playing goes false but the results screen is still active
 mm.playing = false

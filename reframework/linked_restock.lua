@@ -215,6 +215,18 @@ local function count_of(list)
     return #list
 end
 
+local function collection_get(c, i)
+    if c == nil then return nil end
+    local v = safe(function() return c:get_Item(i) end)
+    if v ~= nil then return v end
+    local get_item = safe(function() return c.get_Item end)
+    if get_item then
+        local got = safe(function() return get_item:call(c, i) end)
+        if got ~= nil then return got end
+    end
+    return safe(function() return c[i] end)
+end
+
 local function call_method(obj, name)
     if obj == nil then return nil end
     local v = safe(function() return obj:call(name) end)
@@ -408,20 +420,40 @@ local function localized(guid)
     return get and safe_str(safe(function() return get:call(nil, guid) end)) or nil
 end
 
+-- The item master table, the same path meal-buffet uses for ingredient names
+-- (app.VariousDataManager._Setting._ItemSetting._ItemData).
+local function item_data_table()
+    local vm = safe(function() return sdk.get_managed_singleton("app.VariousDataManager") end)
+    local setting = vm and field_value(vm, "_Setting")
+    local item_setting = setting and field_value(setting, "_ItemSetting")
+    return item_setting and field_value(item_setting, "_ItemData")
+end
+
 local function item_name(fixed_id)
     if fixed_id == nil or fixed_id == 0 then return nil end
     if item_name_cache[fixed_id] ~= nil then
         return item_name_cache[fixed_id] or nil
     end
-    local typed = safe(sdk.find_type_definition, "app.user_data.ItemData")
-    local get_data = typed and safe(function()
-        return typed:get_method("getDataByFixedId(System.Int32)")
-    end)
-    local data = get_data and safe(function() return get_data:call(nil, fixed_id) end)
+    local entry = nil
+    local tbl = item_data_table()
+    if tbl ~= nil then
+        local td = safe(function() return tbl:get_type_definition() end)
+        local m = td and safe(function() return td:get_method("getDataByFixedId(System.Int32)") end)
+        entry = m and safe(function() return m:call(tbl, fixed_id) end)
+    end
+    if entry == nil then
+        -- fall back to the static form on the data type
+        local typed = safe(sdk.find_type_definition, "app.user_data.ItemData")
+        local get_data = typed and safe(function()
+            return typed:get_method("getDataByFixedId(System.Int32)")
+        end)
+        entry = get_data and safe(function() return get_data:call(nil, fixed_id) end)
+    end
     local name = nil
-    if data ~= nil then
-        name = localized(field_value(data, "RawName") or field_value(data, "_RawName"))
-            or safe_str(field_value(data, "Name"))
+    if entry ~= nil then
+        name = localized(call_method(entry, "get_RawName")
+            or field_value(entry, "RawName") or field_value(entry, "_RawName"))
+            or safe_str(field_value(entry, "Name"))
     end
     item_name_cache[fixed_id] = name or false
     return name
@@ -463,7 +495,7 @@ local function local_character()
     local arr = instanced_array(pm)
     if arr then
         for i = 0, 7 do
-            local inst = safe(function() return arr[i] end)
+            local inst = collection_get(arr, i)
             if inst == nil then break end
             local pi = call_method(inst, "get_PlayerInfo")
             local ch = character_of(inst, pi)
@@ -543,11 +575,6 @@ local function category_of(obj)
     local cg = enum_number(field_value(obj, "Category_Gender"))
     if cg ~= nil then return math.floor(cg) % 256 end
     return nil
-end
-
--- Armour category bits: 0 with the gender in bit 0, so 0 and 1 are armour.
-local function is_armor_category(cat)
-    return cat == 0 or cat == 1
 end
 
 local WEAPON_CATEGORY = 13
@@ -645,7 +672,11 @@ end
 
 local function current_skills()
     local _, status = local_character()
-    local skill = status and field_value(status, "_Skill")
+    if status == nil then
+        skill_source_error = "no local hunter status (" .. tostring(last_character_source or "?") .. ")"
+        return nil
+    end
+    local skill = field_value(status, "_Skill")
     if skill == nil then
         skill_source_error = "no _Skill on HunterStatus"
         return nil
@@ -711,7 +742,9 @@ local function weapon_name(wtype, wid)
             if ix ~= nil and (ix == wid + 1 or ix == wid) then entry = e break end
         end
     end
-    local name = entry and localized(field_value(entry, "_Name"))
+    local raw = entry and (field_value(entry, "_Name")
+        or safe(function() return entry:get_field("_Name") end))
+    local name = localized(raw)
     weapon_name_cache[key] = name or false
     return name
 end
@@ -933,7 +966,15 @@ end
 local apply_candidates_cache = nil
 
 local function method_param_count(m)
-    return #(safe(function() return m:get_param_types() end) or {})
+    -- get_num_params() is the reliable count (hunt_dumper uses it); the param
+    -- type array itself is not a Lua table, so # is only a fallback.
+    local n = safe(function() return m:get_num_params() end)
+    if type(n) == "number" then return n end
+    local params = safe(function() return m:get_param_types() end)
+    if params == nil then return 0 end
+    local k = safe(function() return #params end)
+    if type(k) == "number" and k > 0 then return k end
+    return #collect(params, 8)
 end
 
 local function method_is_static(m)
@@ -989,26 +1030,32 @@ local function apply_candidates()
     return out
 end
 
+-- Try every plausible call shape for a candidate: static and instance form,
+-- display index and 0-based index. Which one is right is decided by the pouch
+-- read-back, not by guessing the method's intent.
 local function call_candidate(cand, index)
     local td = safe(sdk.find_type_definition, cand.type)
     local m = td and safe(function() return td:get_method(cand.name) end)
     if not m then return false, "method gone" end
-    -- try the display index and the 0-based one; the pouch check decides
-    local tries = { index, index - 1 }
-    for _, i in ipairs(tries) do
+    local obj = safe(item_param) or safe(save_data)
+    local attempts = {}
+    for _, i in ipairs({ index, index - 1 }) do
+        attempts[#attempts + 1] = { self = nil, index = i }
+        if obj ~= nil then attempts[#attempts + 1] = { self = obj, index = i } end
+    end
+    for _, a in ipairs(attempts) do
         local ok = safe(function()
-            if cand.static then
-                if cand.params == 1 then m:call(nil, i)
-                else m:call(nil, i, false) end
+            if cand.params == 1 then
+                m:call(a.self, a.index)
             else
-                local obj = item_param() or save_data()
-                if obj == nil then return nil end
-                if cand.params == 1 then m:call(obj, i)
-                else m:call(obj, i, false) end
+                m:call(a.self, a.index, false)
             end
             return true
         end)
-        if ok then return true, cand.name .. "(" .. tostring(i) .. ")" end
+        if ok then
+            return true, string.format("%s(%s%s)", cand.name, tostring(a.index),
+                a.self ~= nil and ", self" or "")
+        end
     end
     return false, "call failed"
 end
@@ -1023,6 +1070,8 @@ local state = {
     last_in_quest = nil,
     quest_seq = 0,
     accept_done_seq = -1,
+    accept_pending = false,
+    accept_frames = 0,
     hub_frames = 0,
     hub_pending = false,
     task = nil,          -- { link, reason, diff, phase, strategies, try, wait, attempts }
@@ -1331,12 +1380,14 @@ local function poll()
         if q == true then
             state.quest_seq = state.quest_seq + 1
             state.hub_pending = false
-            if config.triggers.quest_accept and state.accept_done_seq ~= state.quest_seq then
-                state.accept_done_seq = state.quest_seq
-                state.dirty = true
-                fire("quest accepted")
+            if config.triggers.quest_accept then
+                -- one second after the quest starts: the game initialises the
+                -- quest pouch at the start, and a write before that is lost
+                state.accept_pending = true
+                state.accept_frames = 60
             end
         else
+            state.accept_pending = false
             -- the quest is over: wait until the game itself is out of the quest
             -- (IsActiveQuest stays true through the results screen) and then a
             -- beat longer, so the return flow cannot overwrite the pouch
@@ -1344,6 +1395,19 @@ local function poll()
             state.hub_pending = config.triggers.hub_return
         end
         state.last_in_quest = q
+    end
+
+    if state.accept_pending then
+        if q ~= true then
+            state.accept_pending = false
+        elseif state.accept_frames > 0 then
+            state.accept_frames = state.accept_frames - 1
+        else
+            state.accept_pending = false
+            state.accept_done_seq = state.quest_seq
+            state.dirty = true
+            fire("quest accepted")
+        end
     end
 
     if state.hub_pending and q == false then
@@ -1725,6 +1789,9 @@ LR._test = {
     tick_task = tick_task,
     poll = poll,
     fire = fire,
+    current_signature = current_signature,
+    game_loadout_name = game_loadout_name,
+    piece_key = piece_key,
     item_set_contents = item_set_contents,
     item_set_name = item_set_name,
     pouch_snapshot = pouch_snapshot,

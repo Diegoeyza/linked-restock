@@ -11,8 +11,9 @@ weapon-swap problem.
   (`full`, `no_weapon`, `gear`, `armor`), so a second weapon no longer breaks
   the link.
 - Match modes are inherited from the global switch unless a link overrides it.
-- Restock triggers: quest accepted (default) and back in the hub (2 s delay so
-  the game's own return flow cannot overwrite it).
+- Restock triggers: quest accepted (default, plus a 1 s settle so the game's
+  quest-pouch initialisation has happened) and back in the hub (only once the
+  game reports it is out of the quest, plus 2 s).
 - Apply pipeline: the game's own item-set call (candidates ranked by name),
   verified by reading the pouch back, with a clamped pouch top-up from the item
   box as the last resort. Nothing is ever created.
@@ -26,4 +27,4 @@ weapon-swap problem.
 - `tools/loadout_probe.lua`: read-only discovery probe for gear, item sets,
   apply candidates and item names.
 - Offline test suite for the pure logic (signature keys, mode selection, link
-  resolution, diff/preview, normalisation) — 121 assertions under Lua 5.1.
+  resolution, diff/preview, normalisation) — 150 assertions under Lua 5.1.

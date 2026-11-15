@@ -1,7 +1,9 @@
 # Linked Restock — verification plan
 
-The mod's pure logic is covered by `tests/` (121 assertions, Lua 5.1). Everything
-that touches the game has to be verified on the machine that runs it. This is
+The pure logic, the apply pipeline (against a fake save) and the build capture
+plus client scenario (against a fake catalogue) are covered by `tests/`
+(150 assertions, Lua 5.1). What cannot be faked is the game itself: every real
+SDK path has to be verified on the machine that runs it. This is
 the order that finds problems fastest.
 
 ## 0. Probe (once, in the hub)
@@ -94,5 +96,5 @@ the thing to adjust — it is one function, near the top of the gear section.
 ## Regression checks after any edit
 
 - `luac -p reframework/linked_restock.lua` (Lua 5.1) — no modern syntax.
-- `LUA=… ./tests/run.sh` — 121 assertions stay green.
+- `LUA=… ./tests/run.sh` — 150 assertions stay green.
 - Panel opens without a Lua error in `reframework/REFramework_log.txt`.

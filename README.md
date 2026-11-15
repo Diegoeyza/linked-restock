@@ -39,8 +39,10 @@ Linked Restock matches on what actually defines the build:
 - **Match modes per link:** armour + skills + weapon, armour + skills,
   armour + charm, or armour pieces only.
 - **Restock on quest accept and/or back in the hub.** Quest accept is the
-  reliable moment (and the default); the hub trigger waits two seconds so the
-  game's own return/arena flow cannot overwrite it.
+  reliable moment (and the default) and waits one second so the game's own
+  quest-pouch initialisation has happened; the hub trigger waits until the game
+  is really out of the quest and two seconds more, so the return/arena flow
+  cannot overwrite it.
 - **Verified apply with fallbacks.** The game's own item-set call is tried
   first; if the pouch did not change, the next candidate runs, and the last
   resort is a pouch top-up from the item box. Nothing is created: the box is the
@@ -108,12 +110,15 @@ skills, the weapon, and the game loadout the build belongs to. If it says
 - `tools/loadout_probe.lua` — read-only discovery probe (gear, item sets, apply
   candidates). Run it in the hub; it writes four JSON files to
   `reframework/data/`.
-- `tests/` — offline tests under Lua 5.1 (121 assertions):
+- `tests/` — offline tests under Lua 5.1 (150 assertions):
   - `logic_test.lua`: signature keys, match modes, link resolution,
     diff/preview, link normalisation.
   - `pipeline_test.lua`: the apply pipeline and trigger state machine against a
     fake REFramework save (game apply preferred, silent-call fallback to the
     box top-up, short box, already stocked, quest-accept/hub-return timing).
+  - `gear_test.lua`: build capture from the live catalogue and the client's
+    weapon-swap scenario end to end (strict match refuses, ignore-weapons
+    matches, re-decorated build refuses, gear mode accepts).
 
   ```sh
   LUA=/path/to/lua5.1 ./tests/run.sh

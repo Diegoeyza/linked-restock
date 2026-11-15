@@ -115,6 +115,32 @@ end
 
 -- Shallow object description: primitives inline, objects/arrays by type and
 -- size. Never recurses past one level, so a bad pointer cannot branch.
+-- A param/return/field type: REFramework exposes get_name() and (sometimes)
+-- get_full_name(); try both.
+local function name_of(thing)
+    if thing == nil then return nil end
+    return safe(function() return thing:get_full_name() end)
+        or safe(function() return thing:get_name() end)
+end
+
+-- Param type names of a method: get_num_params() is the count, the returned
+-- array is indexed 1..n (not a Lua table).
+local function method_param_names(m)
+    local out = {}
+    local n = safe(function() return m:get_num_params() end)
+    local pts = safe(function() return m:get_param_types() end)
+    if pts == nil then return out end
+    if type(n) ~= "number" then
+        local k = safe(function() return #pts end)
+        n = (type(k) == "number") and k or 0
+    end
+    for i = 1, n do
+        local p = safe(function() return pts[i] end)
+        out[#out + 1] = name_of(p) or "?"
+    end
+    return out
+end
+
 local function describe(obj, depth, maxFields)
     depth = depth or 0
     maxFields = maxFields or 60
@@ -163,10 +189,9 @@ local function dump_type(typeName, opts)
     end)
     out.fields = {}
     for _, f in ipairs(safe(function() return td:get_fields() end) or {}) do
-        local ftype = safe(function() return f:get_type() end)
         out.fields[#out.fields + 1] = {
             name = safe(function() return f:get_name() end),
-            type = ftype and safe(function() return ftype:get_full_name() end) or nil,
+            type = name_of(safe(function() return f:get_type() end)),
             static = safe(function() return f:is_static() end) == true,
         }
     end
@@ -176,15 +201,10 @@ local function dump_type(typeName, opts)
         for _, m in ipairs(safe(function() return td:get_methods() end) or {}) do
             if n >= (opts.max_methods or 500) then break end
             n = n + 1
-            local params = {}
-            for _, p in ipairs(safe(function() return m:get_param_types() end) or {}) do
-                params[#params + 1] = safe(function() return p:get_full_name() end)
-            end
-            local rt = safe(function() return m:get_return_type() end)
             out.methods[#out.methods + 1] = {
                 name = safe(function() return m:get_name() end),
-                params = params,
-                returns = rt and safe(function() return rt:get_full_name() end) or nil,
+                params = method_param_names(m),
+                returns = name_of(safe(function() return m:get_return_type() end)),
                 static = safe(function() return m:is_static() end) == true,
             }
         end
@@ -543,10 +563,7 @@ local function dump_apply()
         if td then
             for _, m in ipairs(safe(function() return td:get_methods() end) or {}) do
                 local mname = safe(function() return m:get_name() end) or ""
-                local params = {}
-                for _, p in ipairs(safe(function() return m:get_param_types() end) or {}) do
-                    params[#params + 1] = safe(function() return p:get_full_name() end)
-                end
+                local params = method_param_names(m)
                 entry.methods[#entry.methods + 1] = {
                     name = mname, params = params,
                     static = safe(function() return m:is_static() end) == true,

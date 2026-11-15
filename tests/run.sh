@@ -5,6 +5,8 @@
 #                            diff/preview, link normalisation
 #   tests/pipeline_test.lua  the apply pipeline and trigger state machine
 #                            against a fake REFramework save
+#   tests/gear_test.lua      build capture from the live catalogue and the
+#                            client's weapon-swap scenario, end to end
 #
 # LUA=/path/to/lua ./tests/run.sh
 set -e
@@ -25,7 +27,7 @@ if [ -z "$LUA_BIN" ]; then
 fi
 
 status=0
-for test_file in tests/logic_test.lua tests/pipeline_test.lua; do
+for test_file in tests/logic_test.lua tests/pipeline_test.lua tests/gear_test.lua; do
     echo "== $test_file"
     "$LUA_BIN" "$test_file" || status=1
 done
