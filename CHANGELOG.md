@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.21 — one gated hub restock, game call first
+
+The 0.1.20 split (top-up at the trigger, exact apply later) meant the game's own
+call was skipped whenever the top-up already reached the set counts. Requested
+behaviour is the opposite: do the exact apply, just never at quest end.
+
+- The hub restock now waits for the gate **first** and then runs as a single
+  task: `applyMySetToPouch` (and `apply(set)`), with the save-data top-up as the
+  fallback inside the same task. No second pass, no queued state.
+- Gate: no quest, no active quest, no quest result screen, no quest end screen,
+  `GameFlowManager.get_Loading()` false, item data readable — held for
+  `max(hub_delay_frames, 6 polls)` (~3 s by default).
+- Safety net: if the gate never opens for ~60 s (a getter misbehaving), the mod
+  tops up without touching game code and says so, so the pouch is never left
+  short.
+- Panel: `in the hub - waiting (loading)`, `in the hub - restock in 3/6 poll(s)`,
+  Diagnostics `hub gate: 3/6 (open)`.
+
+Log from the successful run (0.1.18, read from `re2_framework_log.txt`):
+`flow playing=false active=false questdata=no director=yes` then
+`try ItemMySetUtil.applyMySetToPouch(3) -> true` and `restocked HH (3 items)` —
+which also confirms the game call takes a **0-based** set index (item set 4 was
+applied as argument 3).
+
 ## 0.1.20 — the hub gate is exact, because the API dump named the signals
 
 The flow dump the 0.1.18 build wrote to `linked_restock_api.json` (read from the

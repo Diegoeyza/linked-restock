@@ -341,46 +341,37 @@ check(run_task(), "it completes through the top-up")
 eq(world.apply_calls, 0, "no game method was called at the trigger")
 eq(T.pouch_snapshot()[1], 5, "the pouch was still restocked")
 
--- 5d) the exact pass waits for a settled hub, then calls the game
-rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
-world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
-mm.playing = false
-mm.active = false
-T.state.last_in_quest = false
-T.state.quest_seq = 1
-T.state.hub_done_seq = 1
-T.state.accept_pending = false
-T.state.pending_retry = nil
-T.state.task = nil
-T.state.settled_polls = 0
-T.state.exact_due = { link = link }
-for _ = 1, 7 do T.poll() end
-eq(T.state.task, nil, "the exact pass has not run after 7 settled polls")
-T.poll()
-check(T.state.task ~= nil, "it starts once the gate has held for 8 polls")
-check(run_task(), "and completes")
-check(world.apply_calls >= 1, "the game's own apply ran at last")
-eq(T.state.exact_due, nil, "the pending exact pass is consumed")
+-- 5d) the hub gate is exact: results screen, loading and quests all block it
+mm.playing, mm.active = false, false
+mm.result, mm.ending, mm.gfm_loading = false, false, false
+T.get_config().hub_delay_frames = 60
+eq(T.hub_need_polls(), 6, "the gate window is at least six polls")
 
--- 5e) the results screen and a loading screen keep the gate closed
-rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
-world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
-T.state.task = nil
-T.state.settled_polls = 0
-T.state.exact_due = { link = link }
+local ok = T.hub_gate()
+eq(ok, true, "a quiet hub opens the gate")
+
 mm.result = true
-for _ = 1, 15 do T.poll() end
-eq(T.state.task, nil, "the results screen blocks the exact pass")
-eq(T.state.settled_polls, 0, "and the gate counter stays at zero")
+local ok2, why2 = T.hub_gate()
+eq(ok2, false, "the results screen closes the gate")
+eq(why2, "results screen", "and names the reason")
 mm.result = false
+
+mm.ending = true
+local ok3, why3 = T.hub_gate()
+eq(ok3, false, "the quest end screen closes the gate")
+eq(why3, "quest end screen", "and names that reason too")
+mm.ending = false
+
 mm.gfm_loading = true
-for _ = 1, 15 do T.poll() end
-eq(T.state.task, nil, "a loading screen blocks the exact pass")
+local ok4, why4 = T.hub_gate()
+eq(ok4, false, "a loading screen closes the gate")
+eq(why4, "loading", "and names it")
 mm.gfm_loading = false
-for _ = 1, 8 do T.poll() end
-check(T.state.task ~= nil, "the gate opens once nothing is in flight")
-T.state.task = nil
-T.state.exact_due = nil
+
+mm.playing = true
+eq(T.hub_gate(), false, "a quest closes the gate")
+mm.playing = false
+eq(T.hub_gate(), true, "and it opens again once nothing is in flight")
 
 -- 6) candidate ranking puts the item-set apply first
 local cands = T.apply_candidates()
@@ -436,10 +427,10 @@ eq(T.state.hub_done_seq, -1, "the results screen is not the hub yet")
 
 -- really out of the quest: the delay has to pass, then it fires once
 mm.active = false
+for _ = 1, 5 do T.poll() end
+eq(T.state.hub_done_seq, -1, "five settled polls are not enough")
 T.poll()
-eq(T.state.hub_done_seq, -1, "one hub poll is not enough")
-T.poll()
-eq(T.state.hub_done_seq, 1, "the hub restock fires once the delay has passed")
+eq(T.state.hub_done_seq, 1, "the hub restock fires once the gate has held")
 for _ = 1, 5 do T.poll() end
 eq(T.state.hub_done_seq, 1, "and once per quest, not every poll")
 
@@ -454,8 +445,8 @@ T.poll()
 eq(T.state.quest_seq, 1, "a mid-quest load counts as a quest in progress")
 mm.playing = false
 mm.active = false
-T.poll()
-T.poll()
+mm.result, mm.ending, mm.gfm_loading = false, false, false
+for _ = 1, 6 do T.poll() end
 eq(T.state.hub_done_seq, 1, "the hub restock still fires after a mid-quest load")
 
 -- 10) no quest seen: sitting in the hub does not restock

@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.20"
+local VERSION = "0.1.21"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1271,8 +1271,8 @@ local state = {
     accept_done_seq = -1,
     accept_pending = false,
     accept_polls = 0,
-    hub_polls = 0,       -- consecutive polls spent out of a quest
     hub_done_seq = -1,   -- quest sequence whose hub return has been handled
+    hub_wait = 0,        -- polls spent waiting for the hub gate
     task = nil,          -- { link, reason, diff, phase, strategies, try, wait, attempts }
     notice = nil,        -- { text, until_frame }
     last_result = "(idle)",
@@ -1281,8 +1281,8 @@ local state = {
     last_sig_error = nil,
     verdicts = {},       -- [link id] = { sig = <signature table>, why = <text> }
     pending_retry = nil, -- { link, reason, retry, at }: re-run after a failure
-    exact_due = nil,     -- { link }: exact game apply, once the hub is settled
     settled_polls = 0,   -- consecutive polls of "hub loaded, nothing running"
+    gate_reason = nil,   -- why the gate is closed, for the panel
     last_gear_source = nil,
     dirty = true,
 }
@@ -1870,7 +1870,7 @@ local function current_weapon_type()
     return nil
 end
 
-local function fire(reason)
+local function fire(reason, exact)
     if not config.enabled then
         note("disabled, nothing fired (" .. tostring(reason) .. ")")
         return false
@@ -1904,15 +1904,10 @@ local function fire(reason)
     }
     state.last_fire = { reason = reason, at = state.frames,
                         label = link.label }
-    local ok, err2 = start_task(link, reason)
+    local ok, err2 = start_task(link, reason, nil, exact)
     if not ok then
         note("cannot restock: " .. tostring(err2 or "unknown"))
         return false
-    end
-    if reason == "back in the hub" then
-        -- the top-up above is already safe and immediate; this always schedules
-        -- the game's own apply for when the hub is properly loaded
-        state.exact_due = { link = link }
     end
     return true
 end
@@ -1946,7 +1941,11 @@ end
 -- the quest flow AND the hub is loaded. IsActiveQuest is already false on the
 -- results screen, so the gate also requires no quest data, no quest director and
 -- readable item data, and it has to hold for a while before anything runs.
-local EXACT_HUB_POLLS = 8 -- ~4 s at the 30-frame poll cadence
+local EXACT_HUB_POLLS = 6 -- at least ~3 s of a settled hub
+
+local function hub_need_polls()
+    return math.max(polls_for_frames(config.hub_delay_frames), EXACT_HUB_POLLS)
+end
 
 -- The exact item-set call may only run on a loaded hub with nothing in flight.
 -- The API dump (linked_restock_api.json) found the precise signals:
@@ -2007,7 +2006,6 @@ local function poll()
     if q ~= state.last_in_quest then
         if q == true then
             state.quest_seq = state.quest_seq + 1
-            state.exact_due = nil
             if config.triggers.quest_accept then
                 -- one second after the quest starts: the game initialises the
                 -- quest pouch at the start, and a write before that is lost
@@ -2045,56 +2043,36 @@ local function poll()
         end
     end
 
-    -- Really back in the hub? The results screen keeps IsActiveQuest true, so
-    -- that has to clear first; only then does the delay start counting.
-    local in_hub = false
-    if q == false then
-        local mm = safe(function()
-            return sdk.get_managed_singleton("app.MissionManager")
-        end)
-        local still_active = mm and call_method(mm, "get_IsActiveQuest")
-        in_hub = (still_active ~= true)
-    end
-    state.hub_polls = in_hub and ((state.hub_polls or 0) + 1) or 0
+    -- Is the game out of the quest AND the hub loaded? This is the precise gate
+    -- the exact item-set call needs, and it also decides when the hub restock
+    -- runs: stage 1 (top-up) then stage 2 (the game's own apply) in one task.
+    local gate_ok, gate_why = false, nil
+    if q == false then gate_ok, gate_why = hub_gate() end
+    state.gate_reason = gate_why
+    state.settled_polls = gate_ok and ((state.settled_polls or 0) + 1) or 0
 
-    local settled, why = false, nil
-    if q == false then settled, why = hub_gate() end
-    state.settled_reason = why
-    state.settled_polls = settled and ((state.settled_polls or 0) + 1) or 0
-
-    -- once the hub has been loaded and quiet for a while, run the exact pass
-    if state.exact_due ~= nil and state.task == nil and state.pending_retry == nil
-        and state.settled_polls >= EXACT_HUB_POLLS then
-        local due = state.exact_due
-        state.exact_due = nil
-        if config.debug then
-            log.info("[LinkedRestock] hub settled, exact apply for "
-                .. tostring(due.link.label))
-        end
-        start_task(due.link, "back in the hub", 0, true)
-    end
-
-    -- Back in the hub: a quest was seen (or we loaded mid-quest) and the game
-    -- has been steadily out of one for the configured delay. This does not
-    -- depend on catching the exact transition, so a poll missed during loading
-    -- cannot lose the restock.
-    if config.triggers.hub_return and in_hub
-        and state.quest_seq > 0
-        and state.quest_seq > state.hub_done_seq
-        and state.hub_polls >= polls_for_frames(config.hub_delay_frames) then
-        if world_ready() then
-            state.hub_retry = 0
+    if config.triggers.hub_return and state.quest_seq > 0
+        and state.quest_seq > state.hub_done_seq then
+        state.hub_wait = (state.hub_wait or 0) + 1
+        if state.settled_polls >= hub_need_polls() then
             state.hub_done_seq = state.quest_seq
+            state.hub_wait = 0
             state.dirty = true
-            fire("back in the hub")
-        else
-            state.hub_retry = (state.hub_retry or 0) + 1
-            if state.hub_retry > READY_RETRY_POLLS then
-                state.hub_done_seq = state.quest_seq
-                note("item data stayed unreadable, hub restock skipped")
-            end
+            -- exact = true: the task may use the game's own apply, and it still
+            -- falls back to the save-data top-up if that does not take
+            fire("back in the hub", true)
+        elseif state.hub_wait > READY_RETRY_POLLS * 3 then
+            -- the gate never opened (one of the getters is misbehaving): top up
+            -- so the pouch is not left short, without touching game code
+            state.hub_done_seq = state.quest_seq
+            state.hub_wait = 0
+            note("hub never settled (" .. tostring(gate_why) .. "), topping up")
+            fire("back in the hub", false)
         end
+    else
+        state.hub_wait = 0
     end
+
 end
 
 local function on_frame()
@@ -2342,17 +2320,13 @@ local function quest_state_text()
     if still_active == true then
         return "results screen - waiting for the hub"
     end
-    if state.exact_due ~= nil then
-        if (state.settled_polls or 0) > 0 then
-            return string.format("in the hub - exact apply in %d/%d poll(s)",
-                state.settled_polls, EXACT_HUB_POLLS)
-        end
-        return "in the hub - exact apply waiting (" ..
-            tostring(state.settled_reason or "not settled") .. ")"
-    end
     if state.quest_seq > 0 and state.quest_seq > (state.hub_done_seq or -1) then
-        return string.format("in the hub - hub restock in %d/%d poll(s)",
-            state.hub_polls or 0, polls_for_frames(config.hub_delay_frames))
+        if (state.settled_polls or 0) > 0 then
+            return string.format("in the hub - restock in %d/%d poll(s)",
+                state.settled_polls, hub_need_polls())
+        end
+        return "in the hub - waiting (" ..
+            tostring(state.gate_reason or "not settled") .. ")"
     end
     if state.quest_seq > 0 then
         return "in the hub - already restocked for this quest"
@@ -2789,9 +2763,9 @@ local function draw_ui()
         imgui.text("gear source: " .. tostring(state.last_gear_source or "-"))
         imgui.text("slot layout: " .. tostring(last_slot_layout or "-"))
         imgui.text("slot score: " .. tostring(last_base_score or "-"))
-        imgui.text(string.format("hub settled: %d/%d polls%s",
-            state.settled_polls or 0, EXACT_HUB_POLLS,
-            state.exact_due and " (exact apply queued)" or ""))
+        imgui.text(string.format("hub gate: %d/%d polls (%s)",
+            state.settled_polls or 0, hub_need_polls(),
+            tostring(state.gate_reason or "open")))
         if state.last_sig ~= nil then
             imgui.text("worn: armour " .. tostring(#(state.last_sig.armor_ids or {}))
                 .. " | weapons " .. tostring(#(state.last_sig.weapon_ids or {}))
@@ -2875,6 +2849,8 @@ LR._test = {
     mode_from_index = mode_from_index,
     mode_to_index = mode_to_index,
     labeled_dropdown = labeled_dropdown,
+    hub_gate = hub_gate,
+    hub_need_polls = hub_need_polls,
     link_mismatch = link_mismatch,
     effective_key = effective_key,
     disable_conflicting = disable_conflicting,
