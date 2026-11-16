@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.11"
+local VERSION = "0.1.12"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -290,15 +290,41 @@ local function sig_key(sig, mode, charm_type_only)
     return table.concat(parts, "#")
 end
 
+-- The groups a link actually compares: the global Ignore-weapons switch picks
+-- the mode (the mode is implicit for the user now), and a link whose weapon roll
+-- could not be known (a saved loadout with no unique weapon in the box) drops
+-- the weapon group instead of never matching.
+local function groups_for(link, cfg)
+    local mode = mode_of(link, cfg)
+    local out = {}
+    for _, g in ipairs(MODE_GROUPS[mode] or MODE_GROUPS.full) do
+        if not (g == "weapon" and link and link.sig and link.sig.weapon_unknown) then
+            out[#out + 1] = g
+        end
+    end
+    return out
+end
+
+-- The key one link compares under. A link built from a saved loadout compares
+-- the charm by amulet type (the my-set may not carry the rolled skills).
+local function link_key(link, sig, cfg)
+    if link == nil or sig == nil then return nil end
+    local loose = (link.origin == "loadout")
+    local parts = {}
+    for _, g in ipairs(groups_for(link, cfg)) do
+        parts[#parts + 1] = group_key(sig, g, loose)
+    end
+    return table.concat(parts, "#")
+end
+
 -- Why a link does not match the build in hand: the names of the groups whose
 -- key differs, or nil when it matches. Used by the panel so a refusal is never
 -- a bare "no match".
 local function link_mismatch(link, sig, cfg)
     if sig == nil or link == nil then return "the build has not been read" end
-    local mode = mode_of(link, cfg)
     local loose = (link.origin == "loadout")
     local bad = {}
-    for _, g in ipairs(MODE_GROUPS[mode] or MODE_GROUPS.full) do
+    for _, g in ipairs(groups_for(link, cfg)) do
         if group_key(sig, g, loose) ~= group_key(link.sig, g, loose) then
             bad[#bad + 1] = GROUP_NAMES[g] or g
         end
@@ -307,21 +333,14 @@ local function link_mismatch(link, sig, cfg)
     return "differs: " .. table.concat(bad, ", ")
 end
 
--- First link whose key matches the current build. The strictest link wins:
--- links are tried in the order the user arranged them, and a link only
--- matches under its own mode, so a "full" link cannot shadow an "armor" one
--- by accident - the caller can also sort by strictness.
+-- First enabled link whose key matches the current build.
 local function resolve_link(sig, links, cfg)
     if sig == nil then return nil, nil, "no build signature" end
     for _, link in ipairs(links or {}) do
         if link.enabled ~= false then
             local mode = mode_of(link, cfg)
-            -- a link built from a saved loadout has no weapon rolls and may be
-            -- missing the charm's rolled skills, so it compares the charm by
-            -- amulet type; links captured from worn gear stay exact
-            local loose_charm = (link.origin == "loadout")
-            local a = sig_key(sig, mode, loose_charm)
-            local b = sig_key(link.sig, mode, loose_charm)
+            local a = link_key(link, sig, cfg)
+            local b = link_key(link, link.sig, cfg)
             if a ~= nil and b ~= nil and a == b then
                 return link, mode, "matched (" .. mode .. ")"
             end
@@ -782,10 +801,27 @@ end
 -- and weapon identity, but NOT the weapon roll fields (Artian bonuses), so a
 -- weapon key built from here is identity + jewels only. Such links are matched
 -- as armour + skills + charm (no_weapon), which is what the loadout can prove.
+-- The equipment box holds one work per owned piece, with the roll fields a
+-- my-set does not keep. A weapon that exists exactly once can therefore lend
+-- its full key (Artian type, created/grinded bonuses) to a loadout-built link.
+local function weapon_from_box(identity)
+    local found, work = 0, nil
+    for _, w in ipairs(collect(equip_param() and field_value(equip_param(),
+        "_EquipBox"))) do
+        if category_of(w) == CAT_WEAPON and piece_identity(w) == identity then
+            found = found + 1
+            if found == 1 then work = w end
+        end
+    end
+    if found == 1 then return work end
+    return nil
+end
+
 local function signature_from_myset(set)
     if set == nil then return nil, "no loadout" end
     local armor, armor_ids, jewels, weapons, weapon_ids = {}, {}, {}, {}, {}
     local charm, charm_id = nil, nil
+    local weapon_unknown = nil
     local slots = collect(field_value(set, "_MysetEquipWork"), 16)
     for slot, w in ipairs(slots) do
         local cat = category_of(w)
@@ -799,7 +835,16 @@ local function signature_from_myset(set)
             elseif cat == CAT_WEAPON and slot <= 8 then
                 local id = piece_identity(w)
                 if id then
-                    weapons[#weapons + 1] = id .. "|" .. piece_skills(w)
+                    local box_work = weapon_from_box(id)
+                    if box_work ~= nil then
+                        -- same fields the worn-gear read sees
+                        weapons[#weapons + 1] =
+                            piece_key(box_work) .. "|" .. piece_skills(box_work)
+                    else
+                        -- duplicate or unknown weapon: the roll cannot be known
+                        weapons[#weapons + 1] = id .. "|" .. piece_skills(w)
+                        weapon_unknown = true
+                    end
                     weapon_ids[#weapon_ids + 1] = id
                 end
             elseif cat == CAT_CHARM then
@@ -819,6 +864,7 @@ local function signature_from_myset(set)
         jewels = sorted_list(jewels),
         charm = charm,
         weapon = #weapons > 0 and table.concat(sorted_list(weapons), "|") or nil,
+        weapon_unknown = weapon_unknown,
         armor_count = #armor,
         jewel_count = #jewels,
         weapon_label = (#weapon_ids > 0) and "from loadout" or nil,
@@ -1249,12 +1295,25 @@ end
 -- config persistence
 -- ---------------------------------------------------------------------------
 
+-- A weapon key written from a saved loadout before 0.1.12 holds the identity
+-- only (cat:type:id); a worn key adds the five roll fields. Such a link cannot
+-- compare weapons, so it is flagged and the weapon group is skipped.
+local function weapon_key_has_rolls(key)
+    if type(key) ~= "string" then return false end
+    local spec = key:match("^([^|]*)") or ""
+    local fields = 1
+    for _ in spec:gmatch(":") do fields = fields + 1 end
+    return fields >= 8
+end
+
 local function normalize_link(l)
     if type(l) ~= "table" then return nil end
     local link = {
         id = type(l.id) == "string" and l.id or tostring(os.time()) .. math.random(1000),
         label = type(l.label) == "string" and l.label or "build",
-        mode = type(l.mode) == "string" and l.mode or "inherit",
+        -- the mode is no longer picked per link: the global Ignore-weapons
+        -- switch decides, and the most granular match is the default
+        mode = "inherit",
         item_set = type(l.item_set) == "number" and math.floor(l.item_set) or nil,
         item_set_name = type(l.item_set_name) == "string" and l.item_set_name or nil,
         apply_mode = (l.apply_mode == "topup") and "topup" or "exact",
@@ -1271,10 +1330,15 @@ local function normalize_link(l)
                 or (type(l.sig.skills) == "table" and l.sig.skills) or {},
             weapon = l.sig.weapon,
             charm_id = l.sig.charm_id,
+            weapon_unknown = l.sig.weapon_unknown == true or nil,
             weapon_label = l.sig.weapon_label,
         }
         sig.armor_count = #sig.armor
         sig.jewel_count = #sig.jewels
+        if sig.weapon_unknown == nil and link.origin == "loadout"
+            and sig.weapon ~= nil and not weapon_key_has_rolls(sig.weapon) then
+            sig.weapon_unknown = true
+        end
         link.sig = sig
     end
     if link.sig == nil or #link.sig.armor == 0 then return nil end
@@ -1286,8 +1350,7 @@ end
 -- matching, and only the first in list order would ever apply), so enabling one
 -- turns the others for that build off.
 local function effective_key(link, cfg)
-    if link == nil or link.sig == nil then return nil end
-    return sig_key(link.sig, mode_of(link, cfg), link.origin == "loadout")
+    return link_key(link, link and link.sig, cfg)
 end
 
 local function disable_conflicting(keep)
@@ -1724,7 +1787,6 @@ end
 local ui = {
     set_index = 0,     -- combo position of the item set to link
     armor_index = 0,   -- combo position of the saved armour loadout to link
-    mode_index = 0,    -- 0 = inherit
     show_preview = nil,   -- { link=, diff=, missing= }
     show_diag = false,
 }
@@ -1813,6 +1875,44 @@ local function item_set_labels(choices)
     local out = {}
     for _, c in ipairs(choices) do out[#out + 1] = item_set_label(c) end
     return out
+end
+
+local MATCH_GROUP_TEXT = {
+    armor = "armour", jewels = "skills", charm = "charm", weapon = "weapon",
+}
+
+local function match_text(link)
+    local names = {}
+    for _, g in ipairs(groups_for(link, config)) do
+        names[#names + 1] = MATCH_GROUP_TEXT[g] or g
+    end
+    local text = table.concat(names, " + ")
+    if link ~= nil and link.sig ~= nil and link.sig.weapon_unknown then
+        text = text .. " (no weapon roll data)"
+    end
+    return text
+end
+
+local function item_set_labels(choices)
+    local out = {}
+    for _, c in ipairs(choices) do out[#out + 1] = item_set_label(c) end
+    return out
+end
+
+local MATCH_GROUP_TEXT = {
+    armor = "armour", jewels = "skills", charm = "charm", weapon = "weapon",
+}
+
+local function match_text(link)
+    local names = {}
+    for _, g in ipairs(groups_for(link, config)) do
+        names[#names + 1] = MATCH_GROUP_TEXT[g] or g
+    end
+    local text = table.concat(names, " + ")
+    if link ~= nil and link.sig ~= nil and link.sig.weapon_unknown then
+        text = text .. " (no weapon roll data)"
+    end
+    return text
 end
 
 local function mode_labels()
@@ -1929,12 +2029,7 @@ local function draw_link_row(link, i, choices, live_sig)
         end
     end
 
-    local mpos = labeled_dropdown("  Match", "##mode" .. i,
-        mode_to_index(link.mode), mode_labels())
-    if mpos ~= nil then
-        link.mode = mode_from_index(mpos)
-        changed = true
-    end
+    imgui.text("  Matching: " .. match_text(link))
 
     local why = link_mismatch(link, live_sig, config)
     if link.enabled == false then
@@ -1974,9 +2069,9 @@ local function draw_ui()
     local c2, v2 = imgui.checkbox("Debug log", config.debug)
     if c2 then config.debug = v2 changed = true end
 
-    local c3, v3 = imgui.checkbox("Ignore weapons (armour + skills only)",
-        config.ignore_weapons)
+    local c3, v3 = imgui.checkbox("Ignore weapons", config.ignore_weapons)
     if c3 then config.ignore_weapons = v3 changed = true end
+    imgui.text("  links match on: " .. match_text({ sig = {} }))
     local c4, v4 = imgui.checkbox("Notify missing items", config.notify_missing)
     if c4 then config.notify_missing = v4 changed = true end
 
@@ -2122,9 +2217,6 @@ local function draw_ui()
                 cur_set.named and "" or " (unnamed)"))
         end
 
-        local mi = labeled_dropdown("Match", "##new_mode",
-            ui.mode_index, mode_labels())
-        if mi ~= nil then ui.mode_index = mi end
 
         if #loadout_choices > 0
             and imgui.button("Link selected armour set##link_loadout") then
@@ -2139,20 +2231,9 @@ local function draw_ui()
             elseif target == nil then
                 notify("no item set selected")
             else
-                local mode = mode_from_index(ui.mode_index)
-                local forced = nil
-                -- A saved loadout has no weapon roll fields, and the game does
-                -- not store decorations on every record the same way, so a link
-                -- built from one matches on armour pieces + charm type. Tighten
-                -- it in the row's Match dropdown once it is proven in game.
-                if mode == "full" or mode == "inherit" or mode == "no_weapon" then
-                    mode = "gear"
-                    forced = true
-                end
                 local link = normalize_link({
                     id = tostring(os.time()) .. tostring(math.random(999)),
                     label = entry.name,
-                    mode = mode,
                     item_set = target,
                     item_set_name = item_set_name(target),
                     apply_mode = "exact",
@@ -2165,9 +2246,10 @@ local function draw_ui()
                     config.links[#config.links + 1] = link
                     disable_conflicting(link)
                     changed = true
+                    local note = sig.weapon_unknown
+                        and " (no weapon roll data)" or ""
                     notify("linked " .. entry.name .. " -> "
-                        .. tostring(link.item_set_name or link.item_set)
-                        .. (forced and " (armour + charm)" or ""))
+                        .. tostring(link.item_set_name or link.item_set) .. note)
                 end
             end
         end
@@ -2187,7 +2269,7 @@ local function draw_ui()
                 local link = normalize_link({
                     id = tostring(os.time()) .. tostring(math.random(999)),
                     label = label,
-                    mode = mode_from_index(ui.mode_index),
+                    mode = "inherit",
                     item_set = target,
                     item_set_name = item_set_name(target),
                     apply_mode = "exact",

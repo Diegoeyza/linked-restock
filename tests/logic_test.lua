@@ -233,6 +233,21 @@ end
 -- diff / preview
 -- ---------------------------------------------------------------------------
 
+group("loadout links without weapon rolls")
+do
+    local l = T.normalize_link(link({
+        id = "old", label = "old loadout link", origin = "loadout",
+        sig = sig({ weapon = "13:6:441|235,2,0" }),
+    }))
+    eq(l.sig.weapon_unknown, true,
+        "a loadout link storing an identity-only weapon drops the weapon group")
+    local worn = T.normalize_link(link({
+        id = "worn", label = "worn",
+        sig = sig({ weapon = "13:6:441:0:0:1234567:0:0|235,2,0" }),
+    }))
+    eq(worn.sig.weapon_unknown, nil, "a worn link keeps the weapon group")
+end
+
 group("one enabled link per build")
 do
     local cfg = T.default_config()
@@ -374,7 +389,7 @@ do
     check(n ~= nil, "a complete link is accepted")
     eq(n.item_set, 3, "item set index is an integer")
     eq(n.apply_mode, "topup", "apply mode survives")
-    eq(n.mode, "no_weapon", "mode survives")
+    eq(n.mode, "inherit", "the match mode is always inherited from the global switch")
     eq(n.sig.armor_count, 5, "armour count is recorded")
     eq(n.sig.jewel_count, 5, "jewel slot count is recorded")
     eq(n.enabled, true, "links default to enabled")

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.12 — one matching switch
+
+Reported in game: the per-link **Match** dropdown duplicated the global
+**Ignore weapons** checkbox, so every set had to be configured twice.
+
+- The per-link match-mode dropdown is gone, in the new-link form and in every
+  row. Links always inherit the global switch, and the default is the most
+  granular match: armour pieces + skills + charm + weapon.
+- **Ignore weapons** stays at the top and drops the weapon from that key; the
+  line under it spells out what links currently compare.
+- Each row prints the model as text (`Matching: armour + skills + charm + weapon`)
+  instead of offering it for selection.
+
+A link built from a saved loadout now resolves the weapon's roll from the
+equipment box: if exactly one owned work matches the loadout's weapon id, its
+Artian type / created / grinded fields are used, so such a link is as strict as
+a worn-gear link. If the weapon exists more than once (different rolls) the roll
+cannot be known, so the weapon group is dropped for that link (the row says
+`no weapon roll data`) instead of the link never matching.
+
+Links loaded from an older config have their mode reset to inherit. A loadout
+link saved before this version stores an identity-only weapon key with no roll
+fields, which could never equal a worn key: those are detected and treated as
+"roll unknown", so they keep matching instead of silently failing.
+
 ## 0.1.11 — one enabled link per build
 
 Reported in game: two links for Agressive Conga with different item loadouts were

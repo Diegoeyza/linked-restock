@@ -84,12 +84,13 @@ the thing to adjust — it is one function, near the top of the gear section.
 3. Apply: the new contents are what lands, and the panel still shows the linked
    slot name (the link follows the slot, which is the intended behaviour).
 
-## 7. Loose match modes
+## 7. The one matching switch
 
-1. Link with mode `gear`, change one decoration so the skills differ: the link
-   must still apply.
-2. Link with mode `full`, do the same: nothing is applied, and the panel says
-   `no link matches this build` (this is the safe failure).
+1. With **Ignore weapons** off, link a build, then change one decoration so the
+   skills differ: nothing must be applied and the row says
+   `no match - differs: skills (jewels)` (the safe failure).
+2. Tick **Ignore weapons**: the same link must apply again, and the row reads
+   `Matching: armour + skills + charm`.
 
 ## 8. Two builds, one armour
 
@@ -101,5 +102,5 @@ the thing to adjust — it is one function, near the top of the gear section.
 ## Regression checks after any edit
 
 - `luac -p reframework/linked_restock.lua` (Lua 5.1) — no modern syntax.
-- `LUA=… ./tests/run.sh` — 159 assertions stay green.
+- `LUA=… ./tests/run.sh` — 196 assertions stay green.
 - Panel opens without a Lua error in `reframework/REFramework_log.txt`.

@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.11 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.12 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -36,10 +36,10 @@ Linked Restock matches on what actually defines the build:
 - **One item loadout per build.** Ticking a link switches off every other link
   that would claim the same build, so a link row is unambiguous; keep the
   alternates in the list and tick the one you want.
-- **Ignore weapons.** One checkbox (global) plus a per-link match mode. Use it
-  for the same armour with a fire set and a water set sharing one item loadout.
-- **Match modes per link:** armour + skills + weapon, armour + skills,
-  armour + charm, or armour pieces only.
+- **One matching switch.** Links always compare the most granular identity —
+  armour pieces, skills, charm and weapon — and a single **Ignore weapons**
+  checkbox drops the weapon for every link at once. There is no per-link mode to
+  configure twice.
 - **Restock on quest accept and/or back in the hub.** Quest accept is the
   reliable moment (and the default) and waits one second so the game's own
   quest-pouch initialisation has happened; the hub trigger waits until the game

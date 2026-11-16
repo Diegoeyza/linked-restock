@@ -491,9 +491,25 @@ loadout_link.mode = "gear"
 local m2 = T.resolve_link(worn, { loadout_link }, { ignore_weapons = true })
 check(m2 ~= nil, "armour + charm mode matches too")
 
+-- the equipment box holds exactly one copy of the weapon, so the roll fields
+-- are known and a full match works for a loadout-built link too
+check(msig.weapon_unknown == nil, "the weapon roll was resolved from the box")
 loadout_link.mode = "full"
 local m3 = T.resolve_link(worn, { loadout_link }, { ignore_weapons = false })
-check(m3 == nil, "in full mode it cannot match (my-sets have no weapon rolls)")
+check(m3 ~= nil, "with the roll resolved it matches in full mode as well")
+
+-- two copies of the same weapon id: the roll cannot be known, so the weapon
+-- group is dropped instead of never matching
+local box2 = save3._f._Equip._f._EquipBox._items
+box2[#box2 + 1] = weapon_work(3, 441, 0, 111, { 235, 2, 0 })
+local msig2 = T.signature_from_myset(myset2)
+check(msig2.weapon_unknown == true, "two copies of a weapon leave the roll unknown")
+local link2 = T.normalize_link({
+    id = "loadout2", label = "loadout", item_set = 1, origin = "loadout",
+    sig = msig2,
+})
+local m4 = T.resolve_link(worn, { link2 }, { ignore_weapons = false })
+check(m4 ~= nil, "an unknown weapon roll does not block the match")
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end
