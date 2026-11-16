@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.16 — automatic restocks no longer call into the game
+
+Reported in game: the client crashed at the end of a quest, while the mod was
+restocking for the return.
+
+The automatic path called `app.ItemMySetUtil.applyMySetToPouch(...)` (and had a
+scattershot list of other `Item*` methods behind it) at the moment the game is
+tearing the quest down. Invoking a game method in that state is not something a
+mod can recover from with `pcall` — it crashed the game.
+
+- **Automatic restocks (quest accepted / back in the hub) write save data only.**
+  They top the pouch up from the item box, which never enters game code, so a
+  mistimed attempt costs nothing.
+- The game's own call stays the manual path (`Apply now`, a link's `Apply`),
+  where you are standing in the hub with settled data and it is proven to work.
+- New switch **Game call on automatic restock** (off by default) for anyone who
+  wants to trade that safety for exact item-set semantics on the automatic path.
+- The blind `Item*` method scan is no longer used as a fallback at all: only
+  `applyMySetToPouch`, `apply(set)` and the top-up remain.
+- An automatic retry never runs inside a quest: it waits until you are out.
+- Automatic failures retry up to three times, ~4 s apart, because the pouch is
+  swapped during a quest return.
+
 ## 0.1.15 — the automatic path stops trusting a diff from trigger time
 
 Reported in game: "it works when I select apply now" — the manual apply restocks,

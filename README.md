@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.15 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.16 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -51,12 +51,13 @@ Linked Restock matches on what actually defines the build:
   steadily out of a quest for the configured delay with
   `get_IsActiveQuest()` false, so a missed poll or the results screen cannot
   swallow it. The panel's **Quest:** line shows which of those states you are in.
-- **Verified apply with fallbacks.** The game's own item-set call is tried
-  first; if the pouch did not change, the next candidate runs, and the last
-  resort is a pouch top-up from the item box. Nothing is created: the box is the
-  hard limit. The target is re-read before every attempt, so a pouch the game
-  swaps during a quest return is not compared against stale numbers, and a
-  failed task is re-run a couple of times before it gives up.
+- **Verified apply with fallbacks.** Applying by hand uses the game's own
+  item-set call first and falls back to a pouch top-up from the item box.
+  Automatic restocks use the top-up only: they write save data and never call
+  into the game, because doing that while a quest is being torn down crashed the
+  client. Nothing is created — the box is the hard limit. The target is re-read
+  before every attempt, and a failed automatic restock is re-run a few times,
+  never inside a quest.
 - **Preview before writing.** A per-link preview lists every change
   (`Potion 2 → 5`) and names the items you are short of.
 - **Missing-item reporting** in the panel and, optionally, as an on-screen

@@ -154,7 +154,7 @@ local function fake_game_apply(index)
 end
 
 local apply_method = {
-    get_name = function() return "applyItemMySet(System.Int32)" end,
+    get_name = function() return "applyMySetToPouch(System.Int32)" end,
     get_param_types = function()
         return { { get_full_name = function() return "System.Int32" end } }
     end,
@@ -185,7 +185,7 @@ local util_td = {
     get_fields = function() return {} end,
     get_methods = function() return { pouch_helper, apply_method } end,
     get_method = function(_, sig)
-        if sig == "applyItemMySet(System.Int32)" then return apply_method end
+        if sig == "applyMySetToPouch(System.Int32)" then return apply_method end
         if sig == "restockPouchHelper(System.Int32)" then return pouch_helper end
         return nil
     end,
@@ -325,10 +325,21 @@ eq(T.start_task(link, "test"), false, "an unreadable world does not start a task
 eq(T.state.task, nil, "nothing is queued while the item data is swapped")
 check(T.state.last_result:find("not readable") ~= nil, "and the panel says why")
 
+-- 5c) an automatic restock does not call into the game by default
+rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
+world.apply_calls = 0
+world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
+T.get_config().game_call_on_auto = false
+T.state.task = nil
+check(T.start_task(link, "back in the hub"), "an automatic task starts")
+check(run_task(), "it completes through the top-up")
+eq(world.apply_calls, 0, "no game method was called from the automatic path")
+eq(T.pouch_snapshot()[1], 5, "the pouch was still restocked")
+
 -- 6) candidate ranking puts the item-set apply first
 local cands = T.apply_candidates()
 check(#cands >= 2, "candidates found")
-eq(cands[1].name, "applyItemMySet(System.Int32)", "item-set apply is ranked first")
+eq(cands[1].score, 3, "an item-set apply is ranked highest")
 check(cands[1].score > cands[2].score, "scores are ordered")
 
 -- 7) a link without an item set is refused, not crashed

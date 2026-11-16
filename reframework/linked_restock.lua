@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.15"
+local VERSION = "0.1.16"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -80,6 +80,7 @@ local config = {
     enabled = true,
     debug = false,
     ignore_weapons = false,
+    game_call_on_auto = false, -- automatic restocks write save data only
     notify_missing = true,
     notify = true,
     triggers = { quest_accept = true, hub_return = true },
@@ -1401,6 +1402,9 @@ local function load_config()
     if type(cfg) ~= "table" then config = base return end
     if type(cfg.enabled) == "boolean" then base.enabled = cfg.enabled end
     if type(cfg.debug) == "boolean" then base.debug = cfg.debug end
+    if type(cfg.game_call_on_auto) == "boolean" then
+        base.game_call_on_auto = cfg.game_call_on_auto
+    end
     if type(cfg.ignore_weapons) == "boolean" then base.ignore_weapons = cfg.ignore_weapons end
     if type(cfg.notify_missing) == "boolean" then base.notify_missing = cfg.notify_missing end
     if type(cfg.notify) == "boolean" then base.notify = cfg.notify end
@@ -1450,6 +1454,7 @@ local function save_config()
             enabled = config.enabled,
             debug = config.debug,
             ignore_weapons = config.ignore_weapons,
+            game_call_on_auto = config.game_call_on_auto,
             notify_missing = config.notify_missing,
             notify = config.notify,
             triggers = config.triggers,
@@ -1471,13 +1476,16 @@ local function static_method(type_name, signature)
     return td and safe(function() return td:get_method(signature) end) or nil
 end
 
--- Apply paths, best first. The first two are the calls confirmed on the live
--- build by the probe (2026-11-15); the generic scan stays for other builds.
-local function strategies_for(link, index)
+-- Which apply paths a task may use. Automatic tasks (quest accept, hub return)
+-- write save data only by default: invoking a game method while the game tears a
+-- quest down crashed the client at the end-of-quest screen. The game's own call
+-- is still the manual path, where the player is standing somewhere safe.
+local function strategies_for(link, index, auto)
     local list = {}
     local set_obj = item_sets()[index]
+    local may_call_game = (not auto) or config.game_call_on_auto
 
-    local apply_pouch = static_method("app.ItemMySetUtil",
+    local apply_pouch = may_call_game and static_method("app.ItemMySetUtil",
         "applyMySetToPouch(System.Int32)")
     if apply_pouch ~= nil then
         for _, base in ipairs({ index - 1, index }) do
@@ -1491,7 +1499,7 @@ local function strategies_for(link, index)
         end
     end
 
-    local apply_set = static_method("app.ItemMySetUtil",
+    local apply_set = may_call_game and static_method("app.ItemMySetUtil",
         "apply(app.savedata.cItemMySet)")
     if apply_set ~= nil and set_obj ~= nil then
         list[#list + 1] = {
@@ -1501,18 +1509,6 @@ local function strategies_for(link, index)
                 return true
             end,
         }
-    end
-
-    for _, cand in ipairs(apply_candidates()) do
-        local already = (apply_pouch ~= nil
-                and cand.name == "applyMySetToPouch(System.Int32)")
-            or (apply_set ~= nil and cand.name == "apply(app.savedata.cItemMySet)")
-        if not already then
-            list[#list + 1] = {
-                label = cand.type .. "." .. cand.name,
-                run = function() return call_candidate(cand, index) end,
-            }
-        end
     end
 
     list[#list + 1] = {
@@ -1557,6 +1553,7 @@ local function start_task(link, reason, retry)
         notify("item data is not readable yet, will retry")
         return false, "item data not readable"
     end
+    local auto = (reason == "quest accepted" or reason == "back in the hub")
     local mode = (link.apply_mode == "topup") and "topup" or "exact"
     local diff, missing = compute_diff(contents, pouch, box, mode)
     state.task = {
@@ -1566,7 +1563,8 @@ local function start_task(link, reason, retry)
         diff = diff,
         missing = missing,
         mode = mode,
-        strategies = strategies_for(link, index),
+        auto = auto,
+        strategies = strategies_for(link, index, auto),
         try = 1,
         attempts = 0,
         wait = 0,
@@ -1653,10 +1651,11 @@ local function finish_task(ok, detail)
         dump_failure(task, detail)
         -- the game is often still settling right after a quest; re-read and try
         -- again a moment later instead of giving up on the first attempt
-        if (task.retry or 0) < 2 and task.link ~= nil then
+        local limit = task.auto and 3 or 1
+        if (task.retry or 0) < limit and task.link ~= nil then
             state.pending_retry = {
-                link = task.link, reason = task.reason,
-                retry = (task.retry or 0) + 1, at = state.frames + 180,
+                link = task.link, reason = task.reason, auto = task.auto,
+                retry = (task.retry or 0) + 1, at = state.frames + 240,
             }
             note("will retry " .. label .. " in a few seconds")
         end
@@ -1910,12 +1909,18 @@ local function on_frame()
     if state.pending_retry ~= nil and state.frames >= state.pending_retry.at
         and state.task == nil then
         local r = state.pending_retry
-        state.pending_retry = nil
-        if config.debug then
-            log.info("[LinkedRestock] retrying " .. tostring(r.link.label)
-                .. " (" .. tostring(r.retry) .. ")")
+        if r.auto and in_quest() == true then
+            -- an automatic retry never runs inside a quest: wait until the
+            -- player is back out
+            r.at = state.frames + 120
+        else
+            state.pending_retry = nil
+            if config.debug then
+                log.info("[LinkedRestock] retrying " .. tostring(r.link.label)
+                    .. " (" .. tostring(r.retry) .. ")")
+            end
+            start_task(r.link, r.reason, r.retry)
         end
-        start_task(r.link, r.reason, r.retry)
     end
     local ok, err = pcall(tick_task)
     if not ok and config.debug then
@@ -2164,6 +2169,7 @@ local function preview(link)
         notify("item set " .. tostring(link.item_set) .. " is missing")
         return
     end
+    local auto = (reason == "quest accepted" or reason == "back in the hub")
     local mode = (link.apply_mode == "topup") and "topup" or "exact"
     local diff, missing = compute_diff(contents, pouch_snapshot(), box_snapshot(), mode)
     ui.show_preview = { link = link, diff = diff, missing = missing, mode = mode }
@@ -2283,6 +2289,10 @@ local function draw_ui()
     imgui.text("  links match on: " .. match_text({ sig = {} }))
     local c4, v4 = imgui.checkbox("Notify missing items", config.notify_missing)
     if c4 then config.notify_missing = v4 changed = true end
+    local c5, v5 = imgui.checkbox("Game call on automatic restock",
+        config.game_call_on_auto)
+    if c5 then config.game_call_on_auto = v5 changed = true end
+    imgui.text("  automatic restocks write save data only unless this is on")
 
     imgui.separator()
     imgui.text("Restock when:")
