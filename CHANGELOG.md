@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.2 — correct the equipment-slot offset
+
+Reported in game: a worn saved loadout showed as "not one of the saved
+loadouts" and weapon names were off by one, which means the works read out of
+`_EquipBox` were the neighbours of the equipped items.
+
+- `_EquipIndex.Index` may be a 0-based position, a 1-based one, or one below the
+  position. The mod now reads all three offsets and picks one by structure:
+  the five armour slots must carry armour parts 0..4 exactly once (each part is a
+  slot), the charm slot should equal `_CharmEquipped.MainCharm`, and the armour
+  key set should equal one of the saved loadouts. A shifted read fails those
+  checks even though the item *categories* still line up.
+- Weapon labels: resolved through `list[wid + 1]` first (the HuntDumper v0.9.3
+  rule; `FreeVal1` is 0-based into a 1-based list), typed-id match only as a
+  fallback, de-duplicated, at most two names.
+- Diagnostics now show the slot layout (`W A A A A A C W o . . .`) and the chosen
+  offset with its score.
+- Probe: dumps `equip_slots` for all three offsets plus the weapon catalogue
+  around the ids in use, so a naming mismatch can be read off directly.
+
 ## 0.1.1 — probe-verified gear and apply paths
 
 Built from `linked_restock_probe_*.json` on the live build (2026-11-15).

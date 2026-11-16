@@ -140,7 +140,8 @@ local POS = { weapon = 30, armor = 31, charm = 36, weapon2 = 37, mantle = 38 }
 
 local world = {}
 
-local function rebuild_world()
+local function rebuild_world(index_base)
+    index_base = index_base or 0
     local box = {}
     for i = 1, FILLER do
         box[i] = armor_work(900, 0, { -1, -1, -1 }) -- never equipped
@@ -162,11 +163,14 @@ local function rebuild_world()
     put(POS.mantle, mantle)
 
     -- slot order: 1 weapon, 2..6 armour, 7 charm, 8 weapon, 9 mantle
-    local index = {
+    local index = {}
+    for i, pos in ipairs({
         POS.weapon, POS.armor, POS.armor + 1, POS.armor + 2, POS.armor + 3,
         POS.armor + 4, POS.charm, POS.weapon2, POS.mantle,
         -1, -1, -1, -1, -1, -1,
-    }
+    }) do
+        index[i] = pos < 0 and -1 or (pos + index_base)
+    end
 
     -- one saved equipment loadout with the same armour, for the label
     local myset_pieces = {}
@@ -187,7 +191,7 @@ local function rebuild_world()
         _EquipBox = array(box),
         _EquipIndex = object("app.savedata.cEquipIndex", { Index = int_array(index) }),
         _EquipMySet = array({ myset }),
-        _CharmEquipped = object("app.savedata.cCharmEquipped", { MainCharm = 90 }),
+        _CharmEquipped = object("app.savedata.cCharmEquipped", { MainCharm = 192 }),
     })
 
     -- item sets: the game keeps 64 slots, only three are real
@@ -345,7 +349,7 @@ end
 T.set_config(cfg())
 local sig, source = T.current_signature()
 check(sig ~= nil, "the build is readable")
-eq(source, "equip_index (11/11)", "the slot layout scores 11/11 (weapon 3 + 5 armour + charm 3)")
+check(source:find("offset %+0") ~= nil, "the 0 offset is detected (" .. tostring(source) .. ")")
 eq(sig.armor_count, 5, "five armour pieces")
 eq(sig.jewel_count, 5, "five armour jewel slots")
 check(sig.charm ~= nil, "the charm is part of the signature")
@@ -409,6 +413,17 @@ T.state.task = nil
 reset_items()
 check(T.fire("test") == false, "a charm re-roll does not match the old link")
 eq(T.pouch_snapshot()[1], nil, "and nothing was applied")
+
+-- 9) the same save with a 1-based Index must resolve to the same build
+local first_armor = sig.armor
+sdm = rebuild_world(1)
+local sig2, source2 = T.current_signature()
+check(sig2 ~= nil, "the 1-based layout is readable")
+check(source2:find("offset %-1") ~= nil, "the -1 offset is detected (" .. tostring(source2) .. ")")
+eq(table.concat(sig2.armor, "|"), table.concat(first_armor, "|"),
+    "both bases resolve to the same armour")
+local name2 = T.game_loadout_name(sig2)
+eq(name2, "Guardian Arkveld", "and the loadout label is still found")
 
 -- ---------------------------------------------------------------------------
 

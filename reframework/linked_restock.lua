@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.1"
+local VERSION = "0.1.2"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -546,10 +546,55 @@ local function piece_skills(obj)
 end
 
 local last_base_score = nil
+local last_slot_layout = nil
+
+-- Armour keys of every saved equipment loadout, cached for a couple of seconds
+-- (a base check reads 64 my-sets otherwise).
+local saved_armor_cache = { at = -1, keys = {} }
+
+local function saved_armor_keys()
+    local now = os.clock()
+    if saved_armor_cache.at >= 0 and (now - saved_armor_cache.at) < 2.0 then
+        return saved_armor_cache.keys
+    end
+    local keys = {}
+    for _, set in ipairs(equip_mysets()) do
+        local armor = {}
+        for _, w in ipairs(collect(field_value(set, "_MysetEquipWork"), 16)) do
+            if category_of(w) == CAT_ARMOR then
+                local k = piece_key(w)
+                if k then armor[#armor + 1] = k end
+            end
+        end
+        if #armor > 0 then keys[#keys + 1] = table.concat(sorted_list(armor), "|") end
+    end
+    saved_armor_cache = { at = now, keys = keys }
+    return keys
+end
+
+local function slots_of(works, limit)
+    local out = {}
+    for slot = 1, limit or 20 do
+        local w = works[slot]
+        local cat = w and category_of(w)
+        if cat == CAT_WEAPON then out[#out + 1] = "W"
+        elseif cat == CAT_ARMOR then out[#out + 1] = "A"
+        elseif cat == CAT_CHARM then out[#out + 1] = "C"
+        elseif w ~= nil then out[#out + 1] = "o"
+        else out[#out + 1] = "." end
+    end
+    return table.concat(out, " ")
+end
 
 -- The worn gear, by equipment slot, from _EquipIndex.Index -> _EquipBox.
--- The index base is not documented; slot 1 must be a weapon and slots 2..6
--- armour, so both bases are read and the one matching that layout wins.
+--
+-- Whether Index is 0- or 1-based is not documented, and a simple category check
+-- cannot tell: the box groups items by category, so an off-by-one still reads
+-- "a weapon" and "some armour". Three checks that a shift does break decide it:
+--   * the five armour slots must carry armour parts 0..4, each exactly once;
+--   * the charm slot must be the amulet recorded in _CharmEquipped;
+--   * the armour key set should equal one of the saved equipment loadouts
+--     (the common case: you are wearing a loadout).
 local function current_equip_works()
     local ep = equip_param()
     if ep == nil then return nil, "no equip param" end
@@ -558,35 +603,88 @@ local function current_equip_works()
     local idx = collect(holder and field_value(holder, "Index"), 32)
     if box == nil or #idx == 0 then return nil, "no equipment index" end
 
-    local function read_all(base)
+    local charm_holder = field_value(ep, "_CharmEquipped")
+    local equipped_charm = charm_holder and enum_number(field_value(charm_holder, "MainCharm"))
+
+    -- Index may be a 0-based array position, a 1-based one, or one below the
+    -- position; all three offsets are read and the structural checks decide.
+    local function read_all(offset)
         local out = {}
         for slot, v in ipairs(idx) do
             local i = enum_number(v)
-            if i ~= nil and i >= 0 then
-                local w = collection_get(box, i + base)
+            if i ~= nil and i >= 0 and (i + offset) >= 0 then
+                local w = collection_get(box, i + offset)
                 if w ~= nil then out[slot] = w end
             end
         end
         return out
     end
 
+    local function armor_parts_ok(works)
+        local seen = {}
+        for slot = 2, 6 do
+            local w = works[slot]
+            if w == nil or category_of(w) ~= CAT_ARMOR then return false end
+            local part = enum_number(field_value(w, "FreeVal1"))
+            if part == nil or part < 0 or part > 4 or seen[part] then return false end
+            seen[part] = true
+        end
+        return true
+    end
+
+    local function charm_matches(works)
+        local w = works[7]
+        if w == nil or category_of(w) ~= CAT_CHARM then return false end
+        local amulet = enum_number(field_value(w, "FreeVal0"))
+        if amulet == nil or equipped_charm == nil then return false end
+        return amulet == equipped_charm
+    end
+
+    local function armor_is_a_loadout(works)
+        local armor = {}
+        for slot = 1, 20 do
+            local w = works[slot]
+            if w ~= nil and category_of(w) == CAT_ARMOR then
+                local k = piece_key(w)
+                if k then armor[#armor + 1] = k end
+            end
+        end
+        if #armor ~= 5 then return false end
+        local want = table.concat(sorted_list(armor), "|")
+        for _, saved in ipairs(saved_armor_keys()) do
+            if saved == want then return true end
+        end
+        return false
+    end
+
     local function score(works)
         local n = 0
-        if works[1] and category_of(works[1]) == CAT_WEAPON then n = n + 3 end
+        if works[1] ~= nil and category_of(works[1]) == CAT_WEAPON then n = n + 3 end
         for slot = 2, 6 do
-            if works[slot] and category_of(works[slot]) == CAT_ARMOR then n = n + 1 end
+            if works[slot] ~= nil and category_of(works[slot]) == CAT_ARMOR then
+                n = n + 1
+            end
         end
-        if works[7] and category_of(works[7]) == CAT_CHARM then n = n + 3 end
+        if armor_parts_ok(works) then n = n + 5 end
+        if works[7] ~= nil and category_of(works[7]) == CAT_CHARM then n = n + 3 end
+        if charm_matches(works) then n = n + 10 end
+        if armor_is_a_loadout(works) then n = n + 20 end
         return n
     end
 
-    local base0 = read_all(0)
-    local base1 = read_all(1)
-    local s0, s1 = score(base0), score(base1)
-    local works = base0
-    if s1 > s0 then works = base1 end
-    last_base_score = math.max(s0, s1)
-    return works, "equip_index (" .. tostring(math.max(s0, s1)) .. "/11)"
+    local best_works, best_score, best_offset = nil, -1, 0
+    for _, offset in ipairs({ 0, -1, 1 }) do
+        local candidate = read_all(offset)
+        local candidate_score = score(candidate)
+        if candidate_score > best_score then
+            best_works, best_score, best_offset = candidate, candidate_score, offset
+        end
+    end
+    local works = best_works or {}
+    local chosen = best_offset
+    last_base_score = math.max(best_score, 0)
+    last_slot_layout = slots_of(works, #idx)
+    return works, string.format("equip_index (offset %+d, score %d)", chosen, last_base_score)
 end
 
 local last_gear_source = nil
@@ -605,6 +703,7 @@ local function current_signature()
     local armor, jewels, weapons = {}, {}, {}
     local charm = nil
     local weapon_labels = {}
+    local seen_label = {}
     for slot = 1, 20 do
         local w = works[slot]
         if w ~= nil then
@@ -622,7 +721,10 @@ local function current_signature()
                     if label == nil and wt ~= nil then
                         label = string.format("weapon type %d #%s", wt, tostring(wid))
                     end
-                    if label ~= nil then weapon_labels[#weapon_labels + 1] = label end
+                    if label ~= nil and not seen_label[label] and #weapon_labels < 2 then
+                        seen_label[label] = true
+                        weapon_labels[#weapon_labels + 1] = label
+                    end
                 elseif cat == CAT_CHARM then
                     charm = key .. "|" .. piece_skills(w)
                 end
@@ -679,23 +781,36 @@ end
 
 local weapon_name_cache = {}
 
+-- The save's FreeVal1 and get_WeaponID() are the same 0-based position, but
+-- the collected catalogue list is 1-based, so the name lives at [id + 1]
+-- (proven in HuntDumper v0.9.3: id 45 -> list[46] "G. Resounding Galahad",
+-- while the entry whose typed id field equals 45 is the upgrade before it).
 weapon_name = function(wtype, wid)
     if wtype == nil or wid == nil then return nil end
     local key = tostring(wtype) .. ":" .. tostring(wid)
     if weapon_name_cache[key] ~= nil then return weapon_name_cache[key] or nil end
     local list = get_weapon_arrays()[wtype] or {}
-    local id_field = TYPE_ID_FIELD[wtype + 1]
-    local entry = nil
-    if id_field ~= nil then
-        for _, e in ipairs(list) do
-            local id = enum_number(field_value(e, id_field))
-            if id ~= nil and id == wid then entry = e break end
+
+    local function name_of(entry)
+        if entry == nil then return nil end
+        local raw = field_value(entry, "_Name")
+            or safe(function() return entry:get_field("_Name") end)
+        return localized(raw)
+    end
+
+    local name = name_of(list[wid + 1]) or name_of(list[wid])
+    if name == nil then
+        local id_field = TYPE_ID_FIELD[wtype + 1]
+        if id_field ~= nil then
+            for _, e in ipairs(list) do
+                local id = enum_number(field_value(e, id_field))
+                if id ~= nil and (id == wid + 1 or id == wid) then
+                    name = name_of(e)
+                    if name ~= nil then break end
+                end
+            end
         end
     end
-    if entry == nil then entry = list[wid + 1] or list[wid] end
-    local raw = entry and (field_value(entry, "_Name")
-        or safe(function() return entry:get_field("_Name") end))
-    local name = localized(raw)
     weapon_name_cache[key] = name or false
     return name
 end
@@ -1670,6 +1785,7 @@ local function draw_ui()
     if dc2 then ui.show_diag = dv2 end
     if ui.show_diag then
         imgui.text("gear source: " .. tostring(state.last_gear_source or "-"))
+        imgui.text("slot layout: " .. tostring(last_slot_layout or "-"))
         imgui.text("slot base score: " .. tostring(last_base_score or "-"))
         imgui.text("item sets: " .. tostring(#item_sets()))
         imgui.text("pouch slots: " .. tostring(#pouch_works()))

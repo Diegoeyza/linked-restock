@@ -352,6 +352,81 @@ local function dump_gear()
         sub = charm and enum_number(field_value(charm, "SubCharm")),
     }
 
+    -- The equipped slots, exactly as the mod reads them: slot -> box position
+    -- -> both possible index bases. This is the file to look at when a weapon
+    -- name or a slot category looks wrong.
+    local box_all = ep and field_value(ep, "_EquipBox")
+    local idx_list = {}
+    for i, v in ipairs(collect(idx and field_value(idx, "Index"), 32)) do
+        idx_list[i] = enum_number(v)
+    end
+    out.equip_slots_count = #idx_list
+    out.equip_slots = {}
+    for slot, pos in ipairs(idx_list) do
+        local entry = { slot = slot, position = pos }
+        if pos ~= nil and pos >= 0 and box_all ~= nil then
+            for base = 0, 1 do
+                local w = nil
+                local cnt = safe(function() return box_all.get_Item end)
+                if cnt ~= nil then
+                    w = safe(function() return cnt:call(box_all, pos + base) end)
+                end
+                if w == nil then w = safe(function() return box_all[pos + base] end) end
+                if w ~= nil then
+                    local f0 = enum_number(field_value(w, "FreeVal0"))
+                    local f1 = enum_number(field_value(w, "FreeVal1"))
+                    entry["base" .. base] = {
+                        type = type_name(w),
+                        category = enum_number(field_value(w, "Category")),
+                        category_gender = enum_number(field_value(w, "Category_Gender")),
+                        free0 = f0, free1 = f1, free2 = enum_number(field_value(w, "FreeVal2")),
+                        bonus_create = enum_number(field_value(w, "BonusByCreating")),
+                    }
+                end
+            end
+        end
+        out.equip_slots[slot] = entry
+    end
+
+    -- Weapon catalogue around the ids in use, so the id -> name mapping can be
+    -- checked without another run: position, typed id field and display name.
+    local type_fields = { "_LongSword", "_ShortSword", "_TwinSword", "_Tachi",
+        "_Hammer", "_Whistle", "_Lance", "_GunLance", "_SlashAxe", "_ChargeAxe",
+        "_Rod", "_Bow", "_HeavyBowgun", "_LightBowgun" }
+    local weapon_fields = { "_WeaponLongSword", "_WeaponShortSword", "_WeaponTwinSword",
+        "_WeaponTachi", "_WeaponHammer", "_WeaponWhistle", "_WeaponLance",
+        "_WeaponGunLance", "_WeaponSlashAxe", "_WeaponChargeAxe", "_WeaponRod",
+        "_WeaponBow", "_WeaponHeavyBowgun", "_WeaponLightBowgun" }
+    out.weapon_catalog = {}
+    local vdm = safe(function() return sdk.get_managed_singleton("app.VariousDataManager") end)
+    local equip_datas = vdm and safe(function() return vdm._Setting._EquipDatas end)
+    for wtype = 0, 13 do
+        local arr = equip_datas and safe(function()
+            return equip_datas[weapon_fields[wtype + 1]]
+        end)
+        if arr ~= nil then
+            local values = collect(safe(function() return arr:call("get_Values") end), 400)
+            local entry = { type = wtype, count = #values, entries = {} }
+            for pos, e in ipairs(values) do
+                if pos <= 60 or pos > #values - 6 then
+                    local raw = field_value(e, "_Name")
+                        or safe(function() return e:get_field("_Name") end)
+                    local name = nil
+                    if raw ~= nil then
+                        name = safe(function() return via.gui.message.get(raw) end)
+                    end
+                    entry.entries[#entry.entries + 1] = {
+                        pos = pos,
+                        index = enum_number(field_value(e, "_Index")),
+                        typed_id = enum_number(field_value(e, type_fields[wtype + 1])),
+                        name = name,
+                    }
+                end
+            end
+            out.weapon_catalog[wtype] = entry
+        end
+    end
+
     -- every saved equipment my-set: this is the client's "armor loadout"
     out.equip_mysets = {}
     for si, set in ipairs(collect(ep and field_value(ep, "_EquipMySet"), 64)) do
