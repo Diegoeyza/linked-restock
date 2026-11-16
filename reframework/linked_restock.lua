@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.4"
+local VERSION = "0.1.5"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -765,7 +765,7 @@ local function current_signature()
                     jewels[#jewels + 1] = slot .. "=" .. piece_skills(w)
                     local id = piece_identity(w)
                     if id then armor_ids[#armor_ids + 1] = id end
-                elseif cat == CAT_WEAPON then
+                elseif cat == CAT_WEAPON and slot <= 8 then
                     weapons[#weapons + 1] = key .. "|" .. piece_skills(w)
                     local wid_key = piece_identity(w)
                     if wid_key then weapon_ids[#weapon_ids + 1] = wid_key end
@@ -888,26 +888,34 @@ local function game_loadout_name(sig)
         table.concat(sorted_list(sig.weapon_ids or {}), "|"),
     }, "#")
     if loadout_name_cache.key == key then
-        return loadout_name_cache.name, loadout_name_cache.index, loadout_name_cache.quality
+        return loadout_name_cache.name, loadout_name_cache.index,
+            loadout_name_cache.quality, loadout_name_cache.diff
     end
 
     local armor_key = table.concat(sorted_list(sig.armor_ids or {}), "|")
     local weapon_key = table.concat(sorted_list(sig.weapon_ids or {}), "|")
-    local partial = nil
+    local best, best_score = nil, -1
     for _, l in ipairs(saved_loadouts()) do
         if l.armor == armor_key and armor_key ~= "" then
-            if l.weapons == weapon_key and l.charm == sig.charm_id then
+            local score = 0
+            if l.charm == sig.charm_id then score = score + 1 end
+            if l.weapons == weapon_key then score = score + 2 end
+            if score > best_score then best, best_score = l, score end
+            if score == 3 then
                 loadout_name_cache = { key = key, name = l.name, index = l.index,
                                        quality = "full" }
                 return l.name, l.index, "full"
             end
-            if partial == nil then partial = l end
         end
     end
-    if partial ~= nil then
-        loadout_name_cache = { key = key, name = partial.name, index = partial.index,
-                               quality = "armor" }
-        return partial.name, partial.index, "armor"
+    if best ~= nil then
+        local why = {}
+        if best.charm ~= sig.charm_id then why[#why + 1] = "charm" end
+        if best.weapons ~= weapon_key then why[#why + 1] = "weapons" end
+        local diff = table.concat(why, " + ")
+        loadout_name_cache = { key = key, name = best.name, index = best.index,
+                               quality = "armor", diff = diff }
+        return best.name, best.index, "armor", diff
     end
     loadout_name_cache = { key = key, name = nil, index = nil, quality = nil }
     return nil, nil, nil
@@ -1745,15 +1753,15 @@ local function draw_ui()
             sig.armor_count or 0, sig.jewel_count or 0,
             tostring(sig.weapon_label or "no weapon"),
             sig.charm and "set" or "none"))
-        local name, idx, quality = game_loadout_name(sig)
+        local name, idx, quality, diff = game_loadout_name(sig)
         local loadout_line
         if name == nil then
             loadout_line = "not one of the saved loadouts"
         elseif quality == "full" then
             loadout_line = string.format("%s (#%d)", name, idx)
         else
-            loadout_line = string.format("same armour as %s (#%d) - charm/weapons differ",
-                name, idx)
+            loadout_line = string.format("same armour as %s (#%d) - %s differ",
+                name, idx, tostring(diff or "charm/weapons"))
         end
         imgui.text("Game loadout: " .. loadout_line)
         imgui.same_line()
@@ -1882,6 +1890,12 @@ local function draw_ui()
     if ui.show_diag then
         imgui.text("gear source: " .. tostring(state.last_gear_source or "-"))
         imgui.text("slot layout: " .. tostring(last_slot_layout or "-"))
+        if state.last_sig ~= nil then
+            imgui.text("worn: armour " .. tostring(#(state.last_sig.armor_ids or {}))
+                .. " | weapons " .. tostring(#(state.last_sig.weapon_ids or {}))
+                .. " (" .. table.concat(state.last_sig.weapon_ids or {}, " ") .. ")"
+                .. " | charm " .. tostring(state.last_sig.charm_id or "-"))
+        end
         imgui.text("slot base score: " .. tostring(last_base_score or "-"))
         imgui.text("item sets: " .. tostring(#item_sets()))
         imgui.text("pouch slots: " .. tostring(#pouch_works()))

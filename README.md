@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.4 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.5 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -109,7 +109,7 @@ skills, the weapon, and the game loadout the build belongs to. If it says
 - `tools/loadout_probe.lua` — read-only discovery probe (gear, item sets, apply
   candidates). Run it in the hub; it writes four JSON files to
   `reframework/data/`.
-- `tests/` — offline tests under Lua 5.1 (158 assertions):
+- `tests/` — offline tests under Lua 5.1 (159 assertions):
   - `logic_test.lua`: signature keys, match modes, link resolution,
     diff/preview, link normalisation.
   - `pipeline_test.lua`: the apply pipeline and trigger state machine against a

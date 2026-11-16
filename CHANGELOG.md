@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.5 — stop counting specialized equipment as a weapon
+
+The panel reported "same armour as Omega - weapons differ" while the worn set
+was a different loadout with the same armour. Root cause: slot 9 (specialized
+equipment / mantle) holds a work stored with weapon-shaped default fields
+(Category_Gender 13, type 0, id 0), so the build carried a phantom third weapon
+— the same thing that produced "3 weapons ... Hope Sword I" earlier. Every saved
+loadout stores two weapons, so the weapon set could never match.
+
+- Only slots 1..8 contribute weapons to the identity (main weapon, 5 armour,
+  charm at 7, reserve at 8). Later weapon-shaped slots are ignored.
+- The label picks the armour-matching loadout that agrees on the most parts and
+  names what differs (`- weapons differ`, `- charm differ`).
+- Diagnostics gained a `worn:` line (armour count, weapons with their ids,
+  charm) for support reports.
+- Tests: 159 assertions; the fake now has slot 9 shaped like the live build and
+  asserts two weapons and an exact label match.
+
 ## 0.1.4 — the loadout label matches the whole gear
 
 Reported in game: the panel named the "Omega" loadout while the worn set was a

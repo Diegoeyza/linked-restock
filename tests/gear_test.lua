@@ -163,9 +163,7 @@ local function rebuild_world(index_base)
     box[POS.armor + 3]._f.BonusByCreating = 123
     box[POS.armor + 3]._f.GrindingNum = 2
 
-    local mantle = armor_work(2, 0, { -1, -1, -1 })
-    mantle._f.Category_Gender = 17 -- mantle: other category
-    put(POS.mantle, mantle)
+    put(POS.mantle, weapon_work(0, 0, 0, 0, { -1, -1, -1 }))
 
     -- slot order: 1 weapon, 2..6 armour, 7 charm, 8 weapon, 9 mantle
     local index = {}
@@ -373,6 +371,7 @@ eq(sig.armor_count, 5, "five armour pieces")
 eq(sig.jewel_count, 5, "five armour jewel slots")
 check(sig.charm ~= nil, "the charm is part of the signature")
 check(sig.weapon ~= nil and sig.weapon ~= "", "the weapons are part of the signature")
+eq(#(sig.weapon_ids or {}), 2, "only the two real weapon slots count (slot 9 is specialized equipment)")
 
 -- 2) the label matches the whole gear, not just the armour: "Omega" shares the
 --    five armour pieces but has a different secondary weapon and charm, and is
