@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.13 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.14 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -44,11 +44,13 @@ Linked Restock matches on what actually defines the build:
   armour pieces, skills, charm and weapon — and a single **Ignore weapons**
   checkbox drops the weapon for every link at once. There is no per-link mode to
   configure twice.
-- **Restock on quest accept and/or back in the hub.** Quest accept is the
-  reliable moment (and the default) and waits one second so the game's own
-  quest-pouch initialisation has happened; the hub trigger waits until the game
-  is really out of the quest and two seconds more, so the return/arena flow
-  cannot overwrite it.
+- **Restock on quest accept and/or back in the hub.** Quest accept waits one
+  second so the game's own quest-pouch initialisation has happened. The hub
+  trigger is state-based, not edge-based: it arms as soon as a quest has been
+  seen (loading the script mid-quest counts) and fires once the game has been
+  steadily out of a quest for the configured delay with
+  `get_IsActiveQuest()` false, so a missed poll or the results screen cannot
+  swallow it. The panel's **Quest:** line shows which of those states you are in.
 - **Verified apply with fallbacks.** The game's own item-set call is tried
   first; if the pouch did not change, the next candidate runs, and the last
   resort is a pouch top-up from the item box. Nothing is created: the box is the

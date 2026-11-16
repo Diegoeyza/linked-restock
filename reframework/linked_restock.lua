@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.13"
+local VERSION = "0.1.14"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1270,9 +1270,9 @@ local state = {
     quest_seq = 0,
     accept_done_seq = -1,
     accept_pending = false,
-    accept_frames = 0,
-    hub_frames = 0,
-    hub_pending = false,
+    accept_polls = 0,
+    hub_polls = 0,       -- consecutive polls spent out of a quest
+    hub_done_seq = -1,   -- quest sequence whose hub return has been handled
     task = nil,          -- { link, reason, diff, phase, strategies, try, wait, attempts }
     notice = nil,        -- { text, until_frame }
     last_result = "(idle)",
@@ -1283,6 +1283,13 @@ local state = {
     last_gear_source = nil,
     dirty = true,
 }
+
+-- Status line only: no on-screen notice, no throttling by `dirty`. Used by the
+-- trigger path so the panel always explains the last attempt.
+local function note(text)
+    state.last_result = tostring(text)
+    if config.debug then log.info("[LinkedRestock] " .. tostring(text)) end
+end
 
 local function notify(text)
     state.last_result = text
@@ -1637,13 +1644,13 @@ local function current_weapon_type()
 end
 
 local function fire(reason)
-    if not config.enabled then return end
+    if not config.enabled then
+        note("disabled, nothing fired (" .. tostring(reason) .. ")")
+        return false
+    end
     local sig, err = current_signature()
     if sig == nil then
-        if state.dirty then
-            state.dirty = false
-            notify("cannot read the current build: " .. tostring(err))
-        end
+        note("cannot read the current build: " .. tostring(err))
         return false
     end
     state.last_sig = sig
@@ -1655,10 +1662,7 @@ local function fire(reason)
         if idx == nil then idx = config.default_item_set end
         if idx == nil then
             state.last_match = nil
-            if state.dirty then
-                state.dirty = false
-                notify("no link for this build (" .. tostring(why) .. ")")
-            end
+            note("no link for this build (" .. tostring(why) .. ")")
             return false
         end
         link = { item_set = idx, item_set_name = item_set_name(idx),
@@ -1667,13 +1671,15 @@ local function fire(reason)
         why = "fallback"
     end
     state.last_match = {
-        label = link.label, mode = why,
+        label = link.label, mode = why, reason = reason,
         item_set_name = link.item_set_name or item_set_name(link.item_set),
         item_set = link.item_set,
     }
+    state.last_fire = { reason = reason, at = state.frames,
+                        label = link.label }
     local ok, err2 = start_task(link, reason)
     if not ok then
-        notify("cannot restock: " .. tostring(err2 or "unknown"))
+        note("cannot restock: " .. tostring(err2 or "unknown"))
         return false
     end
     return true
@@ -1699,33 +1705,37 @@ local function preview_match(sig)
     return { fallback = idx, fallback_kind = kind, why = why }
 end
 
+-- polls run every 30 frames, so this is "how many polls make up the delay"
+local function polls_for_frames(frames)
+    return math.max(1, math.ceil((frames or 0) / 30))
+end
+
+local ACCEPT_POLLS = 2   -- ~1 s: the game initialises the quest pouch first
+
 local function poll()
     local q = in_quest()
     if q == nil then return end
 
-    -- first reading after load: remember it, do not treat it as a transition
+    -- first reading after load: remember it, do not treat it as a transition.
+    -- Loading the script mid-quest still has to arm the hub return, so that
+    -- counts as a quest already accepted.
     if state.last_in_quest == nil then
         state.last_in_quest = q
+        if q == true and state.quest_seq == 0 then state.quest_seq = 1 end
         return
     end
 
     if q ~= state.last_in_quest then
         if q == true then
             state.quest_seq = state.quest_seq + 1
-            state.hub_pending = false
             if config.triggers.quest_accept then
                 -- one second after the quest starts: the game initialises the
                 -- quest pouch at the start, and a write before that is lost
                 state.accept_pending = true
-                state.accept_frames = 60
+                state.accept_polls = ACCEPT_POLLS
             end
         else
             state.accept_pending = false
-            -- the quest is over: wait until the game itself is out of the quest
-            -- (IsActiveQuest stays true through the results screen) and then a
-            -- beat longer, so the return flow cannot overwrite the pouch
-            state.hub_frames = config.hub_delay_frames
-            state.hub_pending = config.triggers.hub_return
         end
         state.last_in_quest = q
     end
@@ -1733,8 +1743,8 @@ local function poll()
     if state.accept_pending then
         if q ~= true then
             state.accept_pending = false
-        elseif state.accept_frames > 0 then
-            state.accept_frames = state.accept_frames - 1
+        elseif state.accept_polls > 0 then
+            state.accept_polls = state.accept_polls - 1
         else
             state.accept_pending = false
             state.accept_done_seq = state.quest_seq
@@ -1743,21 +1753,29 @@ local function poll()
         end
     end
 
-    if state.hub_pending and q == false then
-        local mm = safe(function() return sdk.get_managed_singleton("app.MissionManager") end)
+    -- Really back in the hub? The results screen keeps IsActiveQuest true, so
+    -- that has to clear first; only then does the delay start counting.
+    local in_hub = false
+    if q == false then
+        local mm = safe(function()
+            return sdk.get_managed_singleton("app.MissionManager")
+        end)
         local still_active = mm and call_method(mm, "get_IsActiveQuest")
-        if still_active == true then
-            -- results screen / return in progress: keep waiting
-            state.hub_frames = config.hub_delay_frames
-            return
-        end
-        if state.hub_frames > 0 then
-            state.hub_frames = state.hub_frames - 1
-        else
-            state.hub_pending = false
-            state.dirty = true
-            fire("back in the hub")
-        end
+        in_hub = (still_active ~= true)
+    end
+    state.hub_polls = in_hub and ((state.hub_polls or 0) + 1) or 0
+
+    -- Back in the hub: a quest was seen (or we loaded mid-quest) and the game
+    -- has been steadily out of one for the configured delay. This does not
+    -- depend on catching the exact transition, so a poll missed during loading
+    -- cannot lose the restock.
+    if config.triggers.hub_return and in_hub
+        and state.quest_seq > 0
+        and state.quest_seq > state.hub_done_seq
+        and state.hub_polls >= polls_for_frames(config.hub_delay_frames) then
+        state.hub_done_seq = state.quest_seq
+        state.dirty = true
+        fire("back in the hub")
     end
 end
 
@@ -1971,6 +1989,35 @@ local function child_end()
     safe(function() imgui.end_child_window() end)
 end
 
+-- What the trigger state machine sees, so a missing restock is explainable
+-- without the log: where the game thinks it is and what is armed.
+local function quest_state_text()
+    local q = in_quest()
+    if q == nil then return "unknown (no quest manager)" end
+    if q == true then
+        if state.accept_pending then
+            return string.format("in a quest - accept restock in %d poll(s)",
+                state.accept_polls or 0)
+        end
+        return "in a quest"
+    end
+    local mm = safe(function()
+        return sdk.get_managed_singleton("app.MissionManager")
+    end)
+    local still_active = mm and call_method(mm, "get_IsActiveQuest")
+    if still_active == true then
+        return "results screen - waiting for the hub"
+    end
+    if state.quest_seq > 0 and state.quest_seq > (state.hub_done_seq or -1) then
+        return string.format("in the hub - hub restock in %d/%d poll(s)",
+            state.hub_polls or 0, polls_for_frames(config.hub_delay_frames))
+    end
+    if state.quest_seq > 0 then
+        return "in the hub - already restocked for this quest"
+    end
+    return "in the hub - no quest seen"
+end
+
 local function ui_text_colored(text, color)
     local ok = safe(function() imgui.text_colored(text, color) return true end)
     if ok ~= true then imgui.text(text) end
@@ -2164,11 +2211,13 @@ local function draw_ui()
             .. tostring(live.why) .. ")", 0xFF8080FF)
     end
     if state.last_match ~= nil then
-        imgui.text(string.format("Last fired: %s -> %s  [%s]",
+        imgui.text(string.format("Last fired: %s -> %s  [%s, %s]",
             tostring(state.last_match.label),
             tostring(state.last_match.item_set_name or "-"),
-            tostring(state.last_match.mode)))
+            tostring(state.last_match.mode),
+            tostring(state.last_match.reason or "?")))
     end
+    imgui.text("Quest: " .. quest_state_text())
     imgui.text("Last: " .. tostring(state.last_result))
     if state.task ~= nil then
         ui_text_colored("working: " .. tostring(state.task.reason), 0xFF80FFFF)

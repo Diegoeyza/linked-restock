@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.14 — the hub return is detected by state, not by an edge
+
+Reported in game: no restock on returning from a quest.
+
+The hub trigger only armed when the mod *observed* the exact quest -> hub
+transition, and it then counted down a delay that a missed poll could swallow.
+Separately, the accept restock decremented a frame counter once per poll (every
+30 frames), so "one second" was really thirty — the accept restock arrived half
+a minute into the quest.
+
+- The hub return now fires when a quest was seen (or the script was loaded
+  mid-quest) and the game has been steadily out of a quest for the configured
+  delay, with `MissionManager.get_IsActiveQuest()` false. The delay starts only
+  when the results screen has really cleared, and it fires once per quest.
+- Loading the script mid-quest counts as a quest in progress, so the hub return
+  still works during development reloads.
+- The accept restock waits two polls (~1 s) instead of sixty.
+- `fire()` always writes a status line: `no link for this build (...)`,
+  `cannot read the current build: ...`, `restock failed: ...` — the panel is no
+  longer silent about a trigger that decided not to act.
+- The panel shows a **Quest:** line — `in a quest`, `results screen - waiting for
+  the hub`, `in the hub - hub restock in 2/4 poll(s)`, `already restocked for
+  this quest`, `no quest seen` — plus the reason in `Last fired:`.
+
 ## 0.1.13 — the link list is a collapsed section with a scroll region
 
 Reported in game: with hundreds of possible linked sets, the list pushed the

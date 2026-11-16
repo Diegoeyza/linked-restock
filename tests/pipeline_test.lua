@@ -329,17 +329,19 @@ local bad = T.start_task({ id = "b", label = "no set" }, "test")
 check(bad == false, "a link without an item set is refused")
 eq(T.state.task, nil, "no task left behind")
 
--- 8) trigger state machine: one accept per quest, hub return only when the
--- game is really out of the quest
+-- 8) trigger state machine: one accept per quest, one hub restock per quest,
+-- and the hub return does not depend on catching the exact transition
 local c2 = cfg()
-c2.hub_delay_frames = 2
+c2.hub_delay_frames = 60 -- two polls
 c2.triggers.quest_accept = true
 c2.triggers.hub_return = true
 T.set_config(c2)
 T.state.last_in_quest = nil
 T.state.quest_seq = 0
 T.state.accept_done_seq = -1
-T.state.hub_pending = false
+T.state.accept_pending = false
+T.state.hub_polls = 0
+T.state.hub_done_seq = -1
 
 mm.playing = false
 mm.active = false
@@ -352,24 +354,53 @@ T.poll()
 eq(T.state.quest_seq, 1, "quest accept is seen")
 eq(T.state.accept_done_seq, -1, "the accept restock waits for the quest to settle")
 check(T.state.accept_pending == true, "accept restock is pending")
-for _ = 1, 70 do T.poll() end
-eq(T.state.accept_done_seq, 1, "the accept trigger fired once")
 T.poll()
+T.poll()
+eq(T.state.accept_done_seq, 1, "the accept restock fires after the settle polls")
+T.poll()
+eq(T.state.accept_done_seq, 1, "and only once per quest")
 eq(T.state.quest_seq, 1, "no second accept inside the same quest")
-eq(T.state.accept_done_seq, 1, "and no second restock")
 
--- achieving the quest: playing goes false but the results screen is still active
+-- quest over: playing goes false but the results screen is still active
 mm.playing = false
 mm.active = true
-T.poll()
-check(T.state.hub_pending == true, "hub return is pending")
 for _ = 1, 10 do T.poll() end
-check(T.state.hub_pending == true, "the results screen is not the hub yet")
+eq(T.state.hub_done_seq, -1, "the results screen is not the hub yet")
 
--- really out of the quest: the delay counts down and then fires
+-- really out of the quest: the delay has to pass, then it fires once
 mm.active = false
+T.poll()
+eq(T.state.hub_done_seq, -1, "one hub poll is not enough")
+T.poll()
+eq(T.state.hub_done_seq, 1, "the hub restock fires once the delay has passed")
 for _ = 1, 5 do T.poll() end
-check(T.state.hub_pending == false, "hub return fires once the game is out")
+eq(T.state.hub_done_seq, 1, "and once per quest, not every poll")
+
+-- 9) reloading the script mid-quest still arms the hub return
+T.state.last_in_quest = nil
+T.state.quest_seq = 0
+T.state.hub_done_seq = -1
+T.state.hub_polls = 0
+mm.playing = true
+mm.active = true
+T.poll()
+eq(T.state.quest_seq, 1, "a mid-quest load counts as a quest in progress")
+mm.playing = false
+mm.active = false
+T.poll()
+T.poll()
+eq(T.state.hub_done_seq, 1, "the hub restock still fires after a mid-quest load")
+
+-- 10) no quest seen: sitting in the hub does not restock
+T.state.last_in_quest = nil
+T.state.quest_seq = 0
+T.state.hub_done_seq = -1
+T.state.hub_polls = 0
+mm.playing = false
+mm.active = false
+T.poll()
+for _ = 1, 5 do T.poll() end
+eq(T.state.hub_done_seq, -1, "nothing to return from, nothing fires")
 
 -- ---------------------------------------------------------------------------
 

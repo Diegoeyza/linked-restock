@@ -66,7 +66,10 @@ the thing to adjust — it is one function, near the top of the gear section.
 
 1. Tick only **Back in the hub**.
 2. Spend items during a quest (eat, flash, trap), finish it.
-3. Two seconds after the results screen the pouch is topped up again. Repeat
+3. Watch the **Quest:** line: `in a quest` -> `results screen - waiting for the
+   hub` -> `in the hub - hub restock in N/4 poll(s)` -> back to
+   `already restocked for this quest`. Two seconds after the results screen the
+   pouch is topped up again. Repeat
    after an arena re-challenge: the restock must not be eaten by the game's
    restore.
 
@@ -102,5 +105,5 @@ the thing to adjust — it is one function, near the top of the gear section.
 ## Regression checks after any edit
 
 - `luac -p reframework/linked_restock.lua` (Lua 5.1) — no modern syntax.
-- `LUA=… ./tests/run.sh` — 196 assertions stay green.
+- `LUA=… ./tests/run.sh` — 200 assertions stay green.
 - Panel opens without a Lua error in `reframework/REFramework_log.txt`.
