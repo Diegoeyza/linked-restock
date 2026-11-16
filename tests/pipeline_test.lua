@@ -318,6 +318,13 @@ check(T.start_task(link, "test"), "already-stocked task returns true")
 eq(T.state.task, nil, "no task is queued when nothing would change")
 check(T.state.last_result:find("already stocked") ~= nil, "result says already stocked")
 
+-- 5b) a mid-transition world (both arrays empty) is not "already stocked"
+rebuild_world({}, {})
+T.state.task = nil
+eq(T.start_task(link, "test"), false, "an unreadable world does not start a task")
+eq(T.state.task, nil, "nothing is queued while the item data is swapped")
+check(T.state.last_result:find("not readable") ~= nil, "and the panel says why")
+
 -- 6) candidate ranking puts the item-set apply first
 local cands = T.apply_candidates()
 check(#cands >= 2, "candidates found")
@@ -328,6 +335,9 @@ check(cands[1].score > cands[2].score, "scores are ordered")
 local bad = T.start_task({ id = "b", label = "no set" }, "test")
 check(bad == false, "a link without an item set is refused")
 eq(T.state.task, nil, "no task left behind")
+
+-- a readable world again: 5b left both arrays empty
+rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
 
 -- 8) trigger state machine: one accept per quest, one hub restock per quest,
 -- and the hub return does not depend on catching the exact transition

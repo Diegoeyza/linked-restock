@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.14"
+local VERSION = "0.1.15"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1280,6 +1280,7 @@ local state = {
     last_sig = nil,
     last_sig_error = nil,
     verdicts = {},       -- [link id] = { sig = <signature table>, why = <text> }
+    pending_retry = nil, -- { link, reason, retry, at }: re-run after a failure
     last_gear_source = nil,
     dirty = true,
 }
@@ -1472,7 +1473,7 @@ end
 
 -- Apply paths, best first. The first two are the calls confirmed on the live
 -- build by the probe (2026-11-15); the generic scan stays for other builds.
-local function strategies_for(link, diff, index)
+local function strategies_for(link, index)
     local list = {}
     local set_obj = item_sets()[index]
 
@@ -1516,12 +1517,30 @@ local function strategies_for(link, diff, index)
 
     list[#list + 1] = {
         label = "top-up from the item box",
-        run = function() return write_topup(diff) end,
+        -- the diff is refreshed before every attempt: the pouch can be swapped
+        -- under us when a quest ends, so the trigger-time diff may be stale
+        run = function()
+            local task = state.task
+            return write_topup(task and task.diff or {})
+        end,
     }
     return list
 end
 
-local function start_task(link, reason)
+-- item data is swapped around a quest; firing while it reads empty made the
+-- diff look satisfied ("already stocked") and the restock was skipped
+local function world_ready()
+    if item_param() == nil then return false end
+    if #box_works() > 0 then return true end
+    for _, w in ipairs(pouch_works()) do
+        local id = enum_number(field_value(w, "ItemIdFixed")) or 0
+        if id ~= 0 then return true end
+    end
+    return false
+end
+
+local function start_task(link, reason, retry)
+    state.pending_retry = nil
     local index = link.item_set
     if index == nil then
         notify("link has no item set assigned")
@@ -1532,20 +1551,29 @@ local function start_task(link, reason)
         notify("item set " .. tostring(index) .. " is missing")
         return false
     end
-    local mode = (link.apply_mode == "topup") and "topup" or "exact"
     local pouch, box = pouch_snapshot(), box_snapshot()
+    if not world_ready() then
+        -- mid-transition: everything reads empty, which is not an empty pouch
+        notify("item data is not readable yet, will retry")
+        return false, "item data not readable"
+    end
+    local mode = (link.apply_mode == "topup") and "topup" or "exact"
     local diff, missing = compute_diff(contents, pouch, box, mode)
     state.task = {
         link = link,
         reason = reason,
+        index = index,
         diff = diff,
         missing = missing,
         mode = mode,
-        strategies = strategies_for(link, diff, index),
+        strategies = strategies_for(link, index),
         try = 1,
         attempts = 0,
         wait = 0,
         phase = "run",
+        baseline = pouch,
+        trace = {},
+        retry = retry or 0,
     }
     if #diff == 0 then
         state.task = nil
@@ -1553,6 +1581,51 @@ local function start_task(link, reason)
         return true
     end
     return true
+end
+
+-- did any pouch count move since `since`?
+local function pouch_changed(since)
+    local now = pouch_snapshot()
+    for k, v in pairs(now) do
+        if (since[k] or 0) ~= v then return true end
+    end
+    for k, v in pairs(since or {}) do
+        if (now[k] or 0) ~= v then return true end
+    end
+    return false
+end
+
+local function failure_detail(task)
+    local tried = {}
+    for i, t in ipairs(task.trace or {}) do
+        if i > 3 then break end
+        tried[#tried + 1] = tostring(t.label)
+    end
+    local why = pouch_changed(task.baseline or {})
+        and "the pouch changed but the set is still short"
+        or "the pouch never changed"
+    local how = #tried > 0 and (" after " .. table.concat(tried, ", ")) or ""
+    return why .. how
+end
+
+-- one file per failure, so a report does not need a reproduction script
+local function dump_failure(task, detail)
+    safe(function()
+        json.dump_file("linked_restock_failed_apply.json", {
+            version = VERSION,
+            at = os.date("%Y-%m-%d %H:%M:%S"),
+            label = tostring(task.link and task.link.label),
+            item_set = task.index,
+            item_set_name = tostring(task.link and task.link.item_set_name),
+            mode = tostring(task.mode),
+            detail = tostring(detail),
+            contents = item_set_contents(task.index),
+            pouch_at_trigger = task.baseline,
+            pouch_now = pouch_snapshot(),
+            box_now = box_snapshot(),
+            trace = task.trace,
+        })
+    end)
 end
 
 local function finish_task(ok, detail)
@@ -1577,6 +1650,16 @@ local function finish_task(ok, detail)
         notify(table.concat(parts, " "))
     else
         notify("restock failed for " .. label .. (detail and (" - " .. detail) or ""))
+        dump_failure(task, detail)
+        -- the game is often still settling right after a quest; re-read and try
+        -- again a moment later instead of giving up on the first attempt
+        if (task.retry or 0) < 2 and task.link ~= nil then
+            state.pending_retry = {
+                link = task.link, reason = task.reason,
+                retry = (task.retry or 0) + 1, at = state.frames + 180,
+            }
+            note("will retry " .. label .. " in a few seconds")
+        end
     end
 end
 
@@ -1587,34 +1670,53 @@ local function tick_task()
         task.wait = task.wait - 1
         return
     end
+
+    -- Refresh the world before every attempt and every check. The pouch and the
+    -- item box are swapped by the game when a quest starts or ends, so a diff
+    -- computed when the trigger fired can describe an object that no longer
+    -- exists by the time the apply runs.
+    local contents = item_set_contents(task.index) or {}
+
     if task.phase == "run" then
+        task.diff, task.missing = compute_diff(contents, pouch_snapshot(),
+            box_snapshot(), task.mode)
         local strat = task.strategies[task.try]
         if strat == nil then
-            finish_task(false, "every apply path failed")
+            finish_task(false, failure_detail(task))
             return
         end
         local ok = safe(strat.run)
         if config.debug then
-            log.info("[LinkedRestock] try " .. strat.label .. " -> " .. tostring(ok))
+            log.info("[LinkedRestock] try " .. tostring(strat.label)
+                .. " -> " .. tostring(ok))
         end
+        task.last_label = strat.label
         task.phase = "verify"
         task.wait = 60 -- one second: some calls apply on the next frame
         return
     end
-    -- verify
-    local pouch = pouch_snapshot()
-    local ok, missing_change = diff_satisfied(task.diff, pouch)
-    if ok then
+
+    -- verify against the set, not against the trigger-time diff: success means
+    -- "the pouch now holds what this item set asks for"
+    local diff_now = compute_diff(contents, pouch_snapshot(), box_snapshot(),
+        task.mode)
+    task.trace[#task.trace + 1] = {
+        label = task.last_label or "?", left = #diff_now,
+    }
+    if #diff_now == 0 then
         finish_task(true, nil)
         return
     end
+    task.diff = diff_now
     task.try = task.try + 1
     task.attempts = task.attempts + 1
     task.phase = "run"
     task.wait = 0
     if task.attempts >= config.retry_limit * (#task.strategies + 1) then
+        local missing_change = diff_now[1]
         local detail = missing_change
             and ("still short of " .. tostring(missing_change.name)) or nil
+        if detail == nil then detail = failure_detail(task) end
         finish_task(false, detail)
     end
 end
@@ -1711,6 +1813,8 @@ local function polls_for_frames(frames)
 end
 
 local ACCEPT_POLLS = 2   -- ~1 s: the game initialises the quest pouch first
+local READY_RETRY_POLLS = 40 -- ~20 s of "the item data is not readable yet"
+
 
 local function poll()
     local q = in_quest()
@@ -1747,9 +1851,21 @@ local function poll()
             state.accept_polls = state.accept_polls - 1
         else
             state.accept_pending = false
-            state.accept_done_seq = state.quest_seq
-            state.dirty = true
-            fire("quest accepted")
+            if world_ready() then
+                state.accept_retry = 0
+                state.accept_done_seq = state.quest_seq
+                state.dirty = true
+                fire("quest accepted")
+            else
+                state.accept_retry = (state.accept_retry or 0) + 1
+                if state.accept_retry > READY_RETRY_POLLS then
+                    state.accept_done_seq = state.quest_seq
+                    note("item data stayed unreadable, quest-accept restock skipped")
+                else
+                    state.accept_pending = true
+                    state.accept_polls = 0
+                end
+            end
         end
     end
 
@@ -1773,15 +1889,34 @@ local function poll()
         and state.quest_seq > 0
         and state.quest_seq > state.hub_done_seq
         and state.hub_polls >= polls_for_frames(config.hub_delay_frames) then
-        state.hub_done_seq = state.quest_seq
-        state.dirty = true
-        fire("back in the hub")
+        if world_ready() then
+            state.hub_retry = 0
+            state.hub_done_seq = state.quest_seq
+            state.dirty = true
+            fire("back in the hub")
+        else
+            state.hub_retry = (state.hub_retry or 0) + 1
+            if state.hub_retry > READY_RETRY_POLLS then
+                state.hub_done_seq = state.quest_seq
+                note("item data stayed unreadable, hub restock skipped")
+            end
+        end
     end
 end
 
 local function on_frame()
     state.frames = state.frames + 1
     state.last_gear_source = last_gear_source
+    if state.pending_retry ~= nil and state.frames >= state.pending_retry.at
+        and state.task == nil then
+        local r = state.pending_retry
+        state.pending_retry = nil
+        if config.debug then
+            log.info("[LinkedRestock] retrying " .. tostring(r.link.label)
+                .. " (" .. tostring(r.retry) .. ")")
+        end
+        start_task(r.link, r.reason, r.retry)
+    end
     local ok, err = pcall(tick_task)
     if not ok and config.debug then
         log.warn("[LinkedRestock] task: " .. tostring(err))

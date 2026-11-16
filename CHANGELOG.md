@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.1.15 — the automatic path stops trusting a diff from trigger time
+
+Reported in game: "it works when I select apply now" — the manual apply restocks,
+the automatic one reported `every apply path failed`.
+
+Manual apply runs in the hub with settled item data. The automatic fire runs
+right after the quest, while the game is swapping the pouch and item-box arrays.
+The task captured the diff at trigger time and verified against it, so it could:
+
+- decide "already stocked" from arrays that read empty during the swap, and do
+  nothing, or
+- keep trying to reach counts read from a pouch object that no longer existed,
+  exhausting every strategy while the real pouch sat untouched.
+
+Now:
+
+- **The diff is recomputed before every attempt and before every check.** Success
+  means "the item set you are linked to is what the pouch holds now", not "the
+  numbers captured at trigger time were reached".
+- **Nothing fires while the item data reads empty.** The trigger waits, up to
+  ~20 s, instead of consuming itself.
+- **A failed task is re-run** after ~3 s, twice at most (with a `will retry` line)
+  — a quest return is a moving target.
+- The failure text now says whether the pouch ever changed and names the
+  strategies tried, e.g. `the pouch never changed after
+  ItemMySetUtil.applyMySetToPouch(3), ItemUtil.fillPouchItems()`.
+- Every failure writes `reframework/data/linked_restock_failed_apply.json` with
+  the set contents, the pouch at trigger time and now, the box, and the trace.
+- `tools/apply_probe.lua` (new, optional): calls each apply method once and
+  records the pouch before/after, for the case where the pipeline itself is in
+  question.
+
 ## 0.1.14 — the hub return is detected by state, not by an edge
 
 Reported in game: no restock on returning from a quest.
