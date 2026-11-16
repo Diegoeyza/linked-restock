@@ -233,6 +233,31 @@ end
 -- diff / preview
 -- ---------------------------------------------------------------------------
 
+group("one enabled link per build")
+do
+    local cfg = T.default_config()
+    cfg.ignore_weapons = true
+    cfg.links = {
+        link({ id = "a", label = "Conga", item_set = 2 }),
+        link({ id = "b", label = "Conga alt", item_set = 3 }),
+        link({ id = "c", label = "Other", item_set = 4,
+               sig = sig({ armor = { "0:777:7:0:0:0:0:0" } }) }),
+    }
+    T.set_config(cfg)
+    eq(T.dedupe_links(), 1, "a second enabled link for the same build is turned off")
+    eq(cfg.links[1].enabled, true, "the first link stays on")
+    eq(cfg.links[2].enabled, false, "the duplicate is off")
+    eq(cfg.links[3].enabled, true, "a link for another build is untouched")
+
+    cfg.links[2].enabled = true
+    local off = T.disable_conflicting(cfg.links[2])
+    eq(#off, 1, "enabling it switched one conflicting link off")
+    eq(off[1], "Conga", "and names the link it switched off")
+    eq(cfg.links[1].enabled, false, "the other link for that build is off")
+    eq(cfg.links[2].enabled, true, "the one just enabled stays on")
+    eq(cfg.links[3].enabled, true, "the other build is still on")
+end
+
 group("link_mismatch")
 do
     local cfg = { ignore_weapons = false }

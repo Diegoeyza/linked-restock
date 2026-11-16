@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.11 — one enabled link per build
+
+Reported in game: two links for Agressive Conga with different item loadouts were
+both ticked, and both rows said they matched.
+
+Two enabled links whose keys resolve to the same build are indistinguishable at
+match time: the panel shows both as matching and only the first in list order
+would ever apply. A build now drives exactly one item set:
+
+- ticking a link switches off every other enabled link that resolves to the same
+  build (same key under its own mode), and the status line says which;
+- creating a link (worn or from a saved loadout) switches off its predecessors
+  for that build;
+- the config is de-duplicated at load and after an import, so an existing file
+  cannot keep two claimants;
+- a disabled row now reads `(off - not used)` instead of claiming a match.
+
+Different builds, and links that only match under a looser mode, are left alone:
+the rule compares the effective key, not just the armour pieces.
+
 ## 0.1.10 — the panel shows the live match, and why a link refuses
 
 Reported in game: "I made a linked set with conga and HH, but when I switched to

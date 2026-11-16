@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.10"
+local VERSION = "0.1.11"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1281,6 +1281,48 @@ local function normalize_link(l)
     return link
 end
 
+-- A build can only drive one item set at a time. Two enabled links whose keys
+-- resolve to the same build would both claim it (the panel would show both as
+-- matching, and only the first in list order would ever apply), so enabling one
+-- turns the others for that build off.
+local function effective_key(link, cfg)
+    if link == nil or link.sig == nil then return nil end
+    return sig_key(link.sig, mode_of(link, cfg), link.origin == "loadout")
+end
+
+local function disable_conflicting(keep)
+    local key = effective_key(keep, config)
+    if key == nil then return {} end
+    local off = {}
+    for _, l in ipairs(config.links or {}) do
+        if l ~= keep and l.enabled ~= false and effective_key(l, config) == key then
+            l.enabled = false
+            off[#off + 1] = tostring(l.label)
+        end
+    end
+    return off
+end
+
+-- keep the first enabled link per build, switch the rest off (used after load
+-- and after importing, so an old config cannot leave two claimants)
+local function dedupe_links()
+    local seen, off = {}, 0
+    for _, l in ipairs(config.links or {}) do
+        if l.enabled ~= false then
+            local key = effective_key(l, config)
+            if key ~= nil then
+                if seen[key] then
+                    l.enabled = false
+                    off = off + 1
+                else
+                    seen[key] = true
+                end
+            end
+        end
+    end
+    return off
+end
+
 local function load_config()
     local cfg = safe(function() return json.load_file(CONFIG_FILE) end)
     local base = default_config()
@@ -1322,6 +1364,11 @@ local function load_config()
         end
     end
     config = base
+    local off = dedupe_links()
+    if off > 0 then
+        log.info("[LinkedRestock] turned off " .. tostring(off)
+            .. " duplicate link(s) for the same build")
+    end
 end
 
 local function save_config()
@@ -1855,6 +1902,12 @@ local function draw_link_row(link, i, choices, live_sig)
     if imgui.checkbox("##on" .. i, link.enabled ~= false) then
         link.enabled = not link.enabled
         changed = true
+        if link.enabled then
+            local off = disable_conflicting(link)
+            if #off > 0 then
+                notify("switched off " .. table.concat(off, ", ") .. " (same build)")
+            end
+        end
     end
     imgui.same_line()
     local suffix = (link.origin == "loadout") and "   (from loadout)" or ""
@@ -1884,7 +1937,9 @@ local function draw_link_row(link, i, choices, live_sig)
     end
 
     local why = link_mismatch(link, live_sig, config)
-    if live_sig == nil then
+    if link.enabled == false then
+        imgui.text("  (off - not used)")
+    elseif live_sig == nil then
         imgui.text("  (build not read yet)")
     elseif why == nil then
         ui_text_colored("  matches the worn build", 0xFF80FF80)
@@ -2108,6 +2163,7 @@ local function draw_ui()
                     notify("cannot read that loadout's armour")
                 else
                     config.links[#config.links + 1] = link
+                    disable_conflicting(link)
                     changed = true
                     notify("linked " .. entry.name .. " -> "
                         .. tostring(link.item_set_name or link.item_set)
@@ -2141,6 +2197,7 @@ local function draw_ui()
                     notify("could not read enough of the build to link it")
                 else
                     config.links[#config.links + 1] = link
+                    disable_conflicting(link)
                     state.last_sig = sig
                     changed = true
                     notify("linked " .. label .. " -> "
@@ -2234,6 +2291,7 @@ local function draw_ui()
                 end
             end
             notify("imported " .. tostring(n) .. " link(s)")
+            dedupe_links()
             changed = true
         end
     end
@@ -2259,6 +2317,9 @@ LR._test = {
     mode_to_index = mode_to_index,
     labeled_dropdown = labeled_dropdown,
     link_mismatch = link_mismatch,
+    effective_key = effective_key,
+    disable_conflicting = disable_conflicting,
+    dedupe_links = dedupe_links,
     group_key = group_key,
     default_config = default_config,
     MODES = MODES,
