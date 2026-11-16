@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.24 — a hub restock can never run mid-quest
+
+Reported in game: it tried to restock just after a quest started, with only
+**Back in the hub** enabled.
+
+The hub trigger waits for the settled-hub gate, but the block that owns it was
+not restricted to being out of a quest, and its fallback clock counted every
+poll. Returning to the hub and leaving again before the gate opened therefore let
+that clock run through the next hunt, and after ~60 s it fired the "gate never
+opened" top-up **inside the quest**. An automatic retry could do the same,
+because it only checked `get_IsPlayingQuest()` once and ran if that read was nil.
+
+- The hub block only runs while the game is out of a quest (`get_IsPlayingQuest`
+  false), so the fallback clock resets the moment a hunt starts.
+- An automatic retry now requires the whole settled-hub gate, not just "not in a
+  quest": no results screen, no end screen, not loading.
+- `start_task` refuses a `back in the hub` task outright while a quest is
+  playing, as a last line of defence.
+- Three pipeline tests: the refusal, the clock staying at zero over 150 polls
+  inside a quest, and a retry being held and rescheduled.
+
 ## 0.1.23 — cleanup: no debug artefacts left switched on
 
 - The flow API dump is no longer written automatically at load or on every flow

@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.23"
+local VERSION = "0.1.24"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1532,6 +1532,14 @@ local function world_ready()
     return false
 end
 
+local function in_quest()
+    local mm = safe(function() return sdk.get_managed_singleton("app.MissionManager") end)
+    if mm == nil then return nil end
+    local v = call_method(mm, "get_IsPlayingQuest")
+    if v == nil then v = call_method(mm, "get_IsActiveQuest") end
+    return v
+end
+
 local function start_task(link, reason, retry, exact)
     state.pending_retry = nil
     local index = link.item_set
@@ -1551,6 +1559,10 @@ local function start_task(link, reason, retry, exact)
         return false, "item data not readable"
     end
     local auto = (reason == "quest accepted" or reason == "back in the hub")
+    if reason == "back in the hub" and in_quest() == true then
+        note("hub restock refused: a quest is playing")
+        return false, "in a quest"
+    end
     local mode = (link.apply_mode == "topup") and "topup" or "exact"
     local diff, missing = compute_diff(contents, pouch, box, mode)
     state.task = {
@@ -1849,14 +1861,6 @@ local function flow_trace(q)
     end
 end
 
-local function in_quest()
-    local mm = safe(function() return sdk.get_managed_singleton("app.MissionManager") end)
-    if mm == nil then return nil end
-    local v = call_method(mm, "get_IsPlayingQuest")
-    if v == nil then v = call_method(mm, "get_IsActiveQuest") end
-    return v
-end
-
 local function current_weapon_type()
     local works = current_equip_works()
     if works == nil then return nil end
@@ -2050,7 +2054,7 @@ local function poll()
     state.gate_reason = gate_why
     state.settled_polls = gate_ok and ((state.settled_polls or 0) + 1) or 0
 
-    if config.triggers.hub_return and state.quest_seq > 0
+    if config.triggers.hub_return and q == false and state.quest_seq > 0
         and state.quest_seq > state.hub_done_seq then
         state.hub_wait = (state.hub_wait or 0) + 1
         if state.settled_polls >= hub_need_polls() then
@@ -2069,6 +2073,8 @@ local function poll()
             fire("back in the hub", false)
         end
     else
+        -- in a quest, or nothing pending: the fallback clock must not accumulate
+        -- across a hunt or it would fire a restock mid-quest
         state.hub_wait = 0
     end
 
@@ -2080,9 +2086,9 @@ local function on_frame()
     if state.pending_retry ~= nil and state.frames >= state.pending_retry.at
         and state.task == nil then
         local r = state.pending_retry
-        if r.auto and in_quest() == true then
-            -- an automatic retry never runs inside a quest: wait until the
-            -- player is back out
+        if r.auto and not hub_gate() then
+            -- an automatic retry only runs on a settled hub: never mid-quest,
+            -- never on the results or loading screens
             r.at = state.frames + 120
         else
             state.pending_retry = nil
@@ -2875,6 +2881,7 @@ LR._test = {
     state = state,
     start_task = start_task,
     tick_task = tick_task,
+    on_frame = on_frame,
     poll = poll,
     fire = fire,
     current_signature = current_signature,

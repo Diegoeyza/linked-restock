@@ -462,5 +462,46 @@ eq(T.state.hub_done_seq, -1, "nothing to return from, nothing fires")
 
 -- ---------------------------------------------------------------------------
 
+-- 11) a hub restock can never start while a quest is playing
+rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
+T.get_config().triggers.hub_return = true
+T.state.task = nil
+mm.playing, mm.active = true, true
+local ok11, why11 = T.start_task(link, "back in the hub")
+eq(ok11, false, "a hub restock is refused during a quest")
+eq(why11, "in a quest", "and says why")
+eq(T.state.task, nil, "nothing is queued")
+
+-- 12) the hub fallback clock does not accumulate across a hunt
+T.state.quest_seq = 5
+T.state.hub_done_seq = 4
+T.state.hub_wait = 0
+T.state.settled_polls = 0
+T.state.last_in_quest = true
+mm.playing, mm.active = true, true
+mm.result, mm.ending, mm.gfm_loading = false, false, false
+for _ = 1, 150 do T.poll() end
+eq(T.state.hub_wait, 0, "the hub fallback clock stays at zero during a quest")
+eq(T.state.hub_done_seq, 4, "and the pending restock is not marked handled")
+eq(T.state.task, nil, "no restock was started mid-quest")
+
+-- 13) an automatic retry is held until the hub settles
+mm.playing, mm.active = false, false
+T.state.last_in_quest = false
+T.state.task = nil
+T.state.frames = 100
+T.state.pending_retry = { link = link, reason = "back in the hub", auto = true,
+                          exact = true, retry = 1, at = 0 }
+mm.playing = true
+T.on_frame()
+check(T.state.pending_retry ~= nil, "an automatic retry is held during a quest")
+check(T.state.pending_retry.at > T.state.frames, "and rescheduled for later")
+mm.playing = false
+mm.result, mm.ending, mm.gfm_loading = false, false, false
+T.state.frames = 300
+T.on_frame()
+eq(T.state.pending_retry, nil, "it runs once the hub is settled")
+T.state.task = nil
+
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end
