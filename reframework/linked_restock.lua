@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.18"
+local VERSION = "0.1.19"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -80,7 +80,6 @@ local config = {
     enabled = true,
     debug = false,
     ignore_weapons = false,
-    game_call_on_auto = true, -- exact apply once the hub is settled
     notify_missing = true,
     notify = true,
     triggers = { quest_accept = true, hub_return = true },
@@ -1404,14 +1403,6 @@ local function load_config()
     if type(cfg) ~= "table" then config = base return end
     if type(cfg.enabled) == "boolean" then base.enabled = cfg.enabled end
     if type(cfg.debug) == "boolean" then base.debug = cfg.debug end
-    local cfg_version = type(cfg.version) == "string" and cfg.version or ""
-    if cfg_version ~= "" and cfg_version < "0.1.18" then
-        -- before 0.1.18 this fired at quest end (and could crash); now it waits
-        -- for a loaded hub, so an old "off" is not a decision about this rule
-        base.game_call_on_auto = true
-    elseif type(cfg.game_call_on_auto) == "boolean" then
-        base.game_call_on_auto = cfg.game_call_on_auto
-    end
     if type(cfg.ignore_weapons) == "boolean" then base.ignore_weapons = cfg.ignore_weapons end
     if type(cfg.notify_missing) == "boolean" then base.notify_missing = cfg.notify_missing end
     if type(cfg.notify) == "boolean" then base.notify = cfg.notify end
@@ -1461,7 +1452,6 @@ local function save_config()
             enabled = config.enabled,
             debug = config.debug,
             ignore_weapons = config.ignore_weapons,
-            game_call_on_auto = config.game_call_on_auto,
             notify_missing = config.notify_missing,
             notify = config.notify,
             triggers = config.triggers,
@@ -1490,7 +1480,7 @@ end
 local function strategies_for(link, index, auto, exact)
     local list = {}
     local set_obj = item_sets()[index]
-    local may_call_game = (not auto) or exact or config.game_call_on_auto
+    local may_call_game = (not auto) or exact
 
     local apply_pouch = may_call_game and static_method("app.ItemMySetUtil",
         "applyMySetToPouch(System.Int32)")
@@ -1907,9 +1897,9 @@ local function fire(reason)
         note("cannot restock: " .. tostring(err2 or "unknown"))
         return false
     end
-    if config.game_call_on_auto and reason == "back in the hub" then
-        -- the top-up above is already safe and immediate; this schedules the
-        -- game's own apply for when the hub is properly loaded
+    if reason == "back in the hub" then
+        -- the top-up above is already safe and immediate; this always schedules
+        -- the game's own apply for when the hub is properly loaded
         state.exact_due = { link = link }
     end
     return true
@@ -2453,12 +2443,8 @@ local function draw_ui()
     imgui.text("  links match on: " .. match_text({ sig = {} }))
     local c4, v4 = imgui.checkbox("Notify missing items", config.notify_missing)
     if c4 then config.notify_missing = v4 changed = true end
-    local c5, v5 = imgui.checkbox("Exact game apply after the hub settles",
-        config.game_call_on_auto)
-    if c5 then config.game_call_on_auto = v5 changed = true end
-    imgui.text("  " .. (config.game_call_on_auto
-        and "top-up at the trigger, then the game's own apply ~10 s into a loaded hub"
-        or "top-up from the item box only"))
+    imgui.text("automatic: top-up at the trigger, then the game's own apply")
+    imgui.text("  once the hub is loaded and quiet (~10 s)")
 
     imgui.separator()
     imgui.text("Restock when:")

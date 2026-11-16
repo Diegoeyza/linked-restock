@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.19 — the exact apply has no switch
+
+Requested in game: "remove the exact apply button, it should always be on,
+otherwise there is no point".
+
+- The **Exact game apply after the hub settles** checkbox is gone, and so is the
+  `game_call_on_auto` config key. The two-stage automatic restock is simply what
+  the mod does:
+  1. at the trigger, a save-data top-up from the item box (immediate, cannot
+     crash);
+  2. ~10 s later, when the quest flow is completely over and the hub has been
+     quiet for the whole gate window, the game's own `applyMySetToPouch`.
+- The panel says `automatic: top-up at the trigger, then the game's own apply /
+  once the hub is loaded and quiet (~10 s)` next to the triggers.
+- The exact pass is skipped when the pouch already holds the set (nothing to
+  fix), and it also repairs a top-up that the game discarded, because it
+  re-reads the pouch before acting.
+- Diagnostics keeps `hub settled: N/20 (exact apply queued)`.
+
 ## 0.1.18 — the exact apply waits for a loaded hub
 
 Requested in game: use the game's own item-set call, "but not at the actual quest

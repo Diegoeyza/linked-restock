@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.18 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.19 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -115,11 +115,12 @@ loadout switch is visible without pressing anything or waiting for a trigger. If
   slots. The automatic triggers do this first, immediately, so the pouch is never
   left short.
 
-With **Exact game apply after the hub settles** on (the default), the automatic
-trigger then runs the game's own call a little later, once the mod can see that
-the quest is fully over and the hub is loaded: no active quest, no active quest
-data, no quest director, readable item data, stable for ~10 s. The Diagnostics
-line `hub settled: N/20` shows that gate counting.
+The automatic trigger then runs the game's own call a little later, once the mod
+can see that the quest is fully over and the hub is loaded: no active quest, no
+active quest data, no quest director, readable item data, stable for ~10 s.
+There is no switch for it — this is always what happens. The Diagnostics line
+`hub settled: N/20` shows that gate counting, and the pass is skipped when the
+pouch already holds the set.
 
 Nothing is ever created: the item box is the hard limit in both paths.
 

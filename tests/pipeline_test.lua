@@ -325,16 +325,37 @@ eq(T.start_task(link, "test"), false, "an unreadable world does not start a task
 eq(T.state.task, nil, "nothing is queued while the item data is swapped")
 check(T.state.last_result:find("not readable") ~= nil, "and the panel says why")
 
--- 5c) an automatic restock does not call into the game by default
+-- 5c) stage 1 of an automatic restock never calls into the game
 rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
 world.apply_calls = 0
 world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
-T.get_config().game_call_on_auto = false
 T.state.task = nil
+T.state.exact_due = nil
 check(T.start_task(link, "back in the hub"), "an automatic task starts")
 check(run_task(), "it completes through the top-up")
-eq(world.apply_calls, 0, "no game method was called from the automatic path")
+eq(world.apply_calls, 0, "no game method was called at the trigger")
 eq(T.pouch_snapshot()[1], 5, "the pouch was still restocked")
+
+-- 5d) the exact pass waits for a settled hub, then calls the game
+rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
+world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
+mm.playing = false
+mm.active = false
+T.state.last_in_quest = false
+T.state.quest_seq = 1
+T.state.hub_done_seq = 1
+T.state.accept_pending = false
+T.state.pending_retry = nil
+T.state.task = nil
+T.state.settled_polls = 0
+T.state.exact_due = { link = link }
+for _ = 1, 19 do T.poll() end
+eq(T.state.task, nil, "the exact pass has not run after 19 settled polls")
+T.poll()
+check(T.state.task ~= nil, "it starts once the gate has held for 20 polls")
+check(run_task(), "and completes")
+check(world.apply_calls >= 1, "the game's own apply ran at last")
+eq(T.state.exact_due, nil, "the pending exact pass is consumed")
 
 -- 6) candidate ranking puts the item-set apply first
 local cands = T.apply_candidates()
