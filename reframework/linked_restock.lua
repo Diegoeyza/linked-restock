@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.21"
+local VERSION = "0.1.22"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -2106,7 +2106,20 @@ local function on_frame()
     end
     if state.notice ~= nil and state.frames < state.notice.until_frame and draw ~= nil then
         safe(function()
-            draw.text(state.notice.text, 40, 120, 0xFFFFFFFF)
+            local text = tostring(state.notice.text)
+            local x, y = 40, 120
+            local pad_x, pad_y = 8, 4
+            local height = 22
+            -- the default font advances about 7-8 px per ASCII character; the
+            -- notice is ASCII only, so this is close enough for a readable box
+            local width = math.min(#text * 8 + pad_x * 2, 880)
+            if type(draw.filled_rect) == "function" then
+                draw.filled_rect(x - pad_x, y - pad_y, width, height, 0xD0000000)
+                if type(draw.outline_rect) == "function" then
+                    draw.outline_rect(x - pad_x, y - pad_y, width, height, 0xFF000000)
+                end
+            end
+            draw.text(text, x, y, 0xFFFFFFFF)
         end)
     end
 end

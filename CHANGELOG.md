@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.22 — the on-screen notice has a background
+
+Reported in game: "the notice needs a background to be able to see it".
+
+The notice was white text drawn straight over the game. It is now drawn on a
+dark translucent panel (`draw.filled_rect`) with a black outline, sized from the
+text length and clamped so a long message cannot run off the screen. If the
+`filled_rect` binding is missing, the text is still drawn as before.
+
 ## 0.1.21 — one gated hub restock, game call first
 
 The 0.1.20 split (top-up at the trigger, exact apply later) meant the game's own
