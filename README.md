@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.6 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.7 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -29,9 +29,10 @@ Linked Restock matches on what actually defines the build:
 
 ## Features
 
-- **Link any build to any item loadout.** Wear the build, pick the item set,
-  press *Link current build*. No need to save an in-game loadout first, though
-  saved loadouts are recognised and used for the label.
+- **Link any build to any item loadout.** Pick a saved armour set and an item
+  set from two dropdowns and press *Link selected armour set* — no need to wear
+  it. Or wear the build and press *Link current build* to capture the weapon's
+  roll data too.
 - **Ignore weapons.** One checkbox (global) plus a per-link match mode. Use it
   for the same armour with a fire set and a water set sharing one item loadout.
 - **Match modes per link:** armour + skills + weapon, armour + skills,
@@ -63,10 +64,14 @@ Linked Restock matches on what actually defines the build:
 
 ## Use
 
-1. In the hub, equip the build you want to link.
-2. Open *Linked Restock*, pick its item loadout in **New link → Item set**.
-3. Choose the **Match** mode with `<` / `>` (leave it on *inherit* to follow the
-   global Ignore-weapons checkbox), then press **Link current build**.
+1. Open *Linked Restock* → **New link**.
+2. Pick the saved **armour set** and the **item set** from the two dropdowns,
+   then press **Link selected armour set**. Nothing has to be worn: the link is
+   built from the saved loadout and matches on armour pieces + charm type.
+   Wearing the build and pressing **Link current build** instead captures the
+   weapon's roll data, which lets the link be stricter.
+3. Leave **Match** on *inherit* to follow the global Ignore-weapons checkbox,
+   or pick a mode explicitly.
 4. Tick **Quest accepted** and/or **Back in the hub**.
 5. Press **Preview** on the link to see exactly what will change, then
    **Apply** to try it immediately.

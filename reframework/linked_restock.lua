@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.6"
+local VERSION = "0.1.7"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -257,7 +257,7 @@ end
 
 -- Canonical string for one build under one mode. Two builds match when their
 -- keys are equal, so the key format must be stable across sessions.
-local function sig_key(sig, mode)
+local function sig_key(sig, mode, charm_type_only)
     if sig == nil then return nil end
     local groups = MODE_GROUPS[mode] or MODE_GROUPS.full
     local parts = {}
@@ -265,7 +265,11 @@ local function sig_key(sig, mode)
         if g == "armor" then
             parts[#parts + 1] = "A:" .. table.concat(sorted_list(sig.armor), "|")
         elseif g == "charm" then
-            parts[#parts + 1] = "C:" .. tostring(sig.charm or "")
+            if charm_type_only and sig.charm_id ~= nil then
+                parts[#parts + 1] = "C:" .. tostring(sig.charm_id)
+            else
+                parts[#parts + 1] = "C:" .. tostring(sig.charm or "")
+            end
         elseif g == "jewels" then
             parts[#parts + 1] = "J:" .. table.concat(sorted_list(sig.jewels), ";")
         elseif g == "weapon" then
@@ -284,7 +288,12 @@ local function resolve_link(sig, links, cfg)
     for _, link in ipairs(links or {}) do
         if link.enabled ~= false then
             local mode = mode_of(link, cfg)
-            local a, b = sig_key(sig, mode), sig_key(link.sig, mode)
+            -- a link built from a saved loadout has no weapon rolls and may be
+            -- missing the charm's rolled skills, so it compares the charm by
+            -- amulet type; links captured from worn gear stay exact
+            local loose_charm = (link.origin == "loadout")
+            local a = sig_key(sig, mode, loose_charm)
+            local b = sig_key(link.sig, mode, loose_charm)
             if a ~= nil and b ~= nil and a == b then
                 return link, mode, "matched (" .. mode .. ")"
             end
@@ -564,6 +573,9 @@ local function id_array_key(obj, field)
         local n = enum_number(v)
         if n ~= nil and n > 0 then out[i] = tostring(n) else out[i] = "" end
     end
+    -- trailing empties carry no meaning (a zero-filled array and an absent one
+    -- are the same piece), and a my-set does not always keep the zero padding
+    while #out > 0 and out[#out] == "" do out[#out] = nil end
     return table.concat(out, ",")
 end
 
@@ -736,6 +748,59 @@ local function current_equip_works()
     return works, string.format("equip_index (offset %+d, score %d)", chosen, last_base_score)
 end
 
+-- Signature of a saved equipment loadout, for linking without wearing it.
+-- The my-set stores the same fields as the worn work for armour, jewels, charm
+-- and weapon identity, but NOT the weapon roll fields (Artian bonuses), so a
+-- weapon key built from here is identity + jewels only. Such links are matched
+-- as armour + skills + charm (no_weapon), which is what the loadout can prove.
+local function signature_from_myset(set)
+    if set == nil then return nil, "no loadout" end
+    local armor, armor_ids, jewels, weapons, weapon_ids = {}, {}, {}, {}, {}
+    local charm, charm_id = nil, nil
+    local slots = collect(field_value(set, "_MysetEquipWork"), 16)
+    for slot, w in ipairs(slots) do
+        local cat = category_of(w)
+        local key = piece_key(w)
+        if key ~= nil then
+            if cat == CAT_ARMOR then
+                armor[#armor + 1] = key
+                local id = piece_identity(w)
+                if id then armor_ids[#armor_ids + 1] = id end
+                jewels[#jewels + 1] = tostring(slot) .. "=" .. piece_skills(w)
+            elseif cat == CAT_WEAPON and slot <= 8 then
+                local id = piece_identity(w)
+                if id then
+                    weapons[#weapons + 1] = id .. "|" .. piece_skills(w)
+                    weapon_ids[#weapon_ids + 1] = id
+                end
+            elseif cat == CAT_CHARM then
+                -- compare the amulet by type: the my-set is not guaranteed to
+                -- keep the rolled-skill array the worn work carries
+                charm = charm_id_of(w)
+                charm_id = charm_id_of(w)
+            end
+        end
+    end
+    if #armor == 0 then return nil, "this loadout has no armour" end
+    return {
+        armor = sorted_list(armor),
+        armor_ids = sorted_list(armor_ids),
+        weapon_ids = sorted_list(weapon_ids),
+        charm_id = charm_id,
+        jewels = sorted_list(jewels),
+        charm = charm,
+        weapon = #weapons > 0 and table.concat(sorted_list(weapons), "|") or nil,
+        armor_count = #armor,
+        jewel_count = #jewels,
+        weapon_label = (#weapon_ids > 0) and "from loadout" or nil,
+        from_loadout = true,
+    }, "loadout"
+end
+
+local function myset_by_index(index)
+    return equip_mysets()[index]
+end
+
 local last_gear_source = nil
 local weapon_name -- display names, defined with the weapon catalogue below
 
@@ -780,7 +845,7 @@ local function current_signature()
                         weapon_labels[#weapon_labels + 1] = label
                     end
                 elseif cat == CAT_CHARM then
-                    charm = key .. "|" .. piece_skills(w)
+                    charm = charm_id_of(w) .. "|" .. piece_skills(w)
                     charm_id = charm_id_of(w)
                 end
             end
@@ -1165,6 +1230,7 @@ local function normalize_link(l)
         item_set_name = type(l.item_set_name) == "string" and l.item_set_name or nil,
         apply_mode = (l.apply_mode == "topup") and "topup" or "exact",
         enabled = l.enabled ~= false,
+        origin = (l.origin == "loadout") and "loadout" or nil,
         sig = nil,
     }
     if type(l.sig) == "table" then
@@ -1175,6 +1241,7 @@ local function normalize_link(l)
             jewels = type(l.sig.jewels) == "table" and l.sig.jewels
                 or (type(l.sig.skills) == "table" and l.sig.skills) or {},
             weapon = l.sig.weapon,
+            charm_id = l.sig.charm_id,
             weapon_label = l.sig.weapon_label,
         }
         sig.armor_count = #sig.armor
@@ -1559,9 +1626,9 @@ end
 -- ---------------------------------------------------------------------------
 
 local ui = {
-    set_index = 0,     -- combo index for the "link current build" picker
+    set_index = 0,     -- combo position of the item set to link
+    armor_index = 0,   -- combo position of the saved armour loadout to link
     mode_index = 0,    -- 0 = inherit
-    new_label = "",
     show_preview = nil,   -- { link=, diff=, missing= }
     show_diag = false,
 }
@@ -1602,14 +1669,6 @@ local function choice_index(choices, pos)
     return c and c.index or nil
 end
 
-local function cycle(pos, delta, count)
-    if count <= 0 then return 0 end
-    pos = (pos or 0) + delta
-    if pos < 0 then return count - 1 end
-    if pos > count - 1 then return 0 end
-    return pos
-end
-
 local function mode_from_index(i)
     return MODES[i] or "inherit"
 end
@@ -1627,25 +1686,39 @@ local function mode_label_at(pos)
     return MODE_LABELS[MODES[pos]] or MODE_LABELS.inherit
 end
 
--- < [name] >  -- buttons, not a combo: the panel is narrow and combo popups
--- were getting clipped, which made the picker unreachable.
-local function item_set_picker(id, choices, current)
-    local pos = choice_pos(choices, current)
-    local result = nil
-    if imgui.button("<##prev" .. id) then
-        result = choice_index(choices, cycle(pos, -1, #choices))
-    end
-    imgui.same_line()
-    local shown = "(missing)"
-    if pos ~= nil and choices[pos + 1] ~= nil then
-        shown = choices[pos + 1].name
-    end
-    imgui.text("[" .. shown .. "]")
-    imgui.same_line()
-    if imgui.button(">##next" .. id) then
-        result = choice_index(choices, cycle(pos, 1, #choices))
-    end
-    return result
+local function item_set_labels(choices)
+    local out = {}
+    for _, c in ipairs(choices) do out[#out + 1] = c.name end
+    return out
+end
+
+local function mode_labels()
+    local out = {}
+    for i = 0, #MODES do out[#out + 1] = mode_label_at(i) end
+    return out
+end
+
+-- The REFramework panel is narrow, so a dropdown takes the whole line instead
+-- of sitting after its label: a combo sharing a line gets pushed off the edge.
+local function dropdown_width()
+    local w = nil
+    safe(function() w = imgui.get_content_region_available_width() end)
+    if type(w) ~= "number" or w <= 0 then w = 300 end
+    w = w - 8
+    if w < 160 then w = 160 end
+    if w > 420 then w = 420 end
+    return w
+end
+
+-- label on one line, dropdown on the next. Returns the new position or nil.
+local function labeled_dropdown(label, id, pos, labels)
+    if type(labels) ~= "table" or #labels == 0 then labels = { "(none)" } end
+    if pos == nil or pos < 0 or pos > #labels - 1 then pos = 0 end
+    imgui.text(label)
+    safe(function() imgui.set_next_item_width(dropdown_width()) end)
+    local changed, newpos = imgui.combo(id, pos, labels)
+    if changed then return newpos end
+    return nil
 end
 
 local function ui_text_colored(text, color)
@@ -1699,31 +1772,29 @@ local function draw_link_row(link, i, choices)
         changed = true
     end
     imgui.same_line()
-    imgui.text(tostring(link.label))
+    local suffix = (link.origin == "loadout") and "   (from loadout)" or ""
+    imgui.text(tostring(link.label) .. suffix)
 
     safe(function() imgui.indent(14) end)
 
-    imgui.text("Item set:")
-    imgui.same_line()
-    local idx = item_set_picker("s" .. i, choices, link.item_set)
-    if idx ~= nil then
-        link.item_set = idx
-        link.item_set_name = item_set_name(idx)
-        changed = true
+    if choice_pos(choices, link.item_set) == nil then
+        ui_text_colored("  item set missing - pick one", 0xFF8080FF)
+    end
+    local pos = labeled_dropdown("  Item set", "##set" .. i,
+        choice_pos(choices, link.item_set), item_set_labels(choices))
+    if pos ~= nil then
+        local idx = choice_index(choices, pos)
+        if idx ~= nil then
+            link.item_set = idx
+            link.item_set_name = item_set_name(idx)
+            changed = true
+        end
     end
 
-    imgui.text("Match:")
-    imgui.same_line()
-    local mpos = mode_to_index(link.mode)
-    if imgui.button("<##mprev" .. i) then
-        link.mode = mode_from_index(cycle(mpos, -1, #MODES + 1))
-        changed = true
-    end
-    imgui.same_line()
-    imgui.text("[" .. mode_label_at(mpos) .. "]")
-    imgui.same_line()
-    if imgui.button(">##mnext" .. i) then
-        link.mode = mode_from_index(cycle(mpos, 1, #MODES + 1))
+    local mpos = labeled_dropdown("  Match", "##mode" .. i,
+        mode_to_index(link.mode), mode_labels())
+    if mpos ~= nil then
+        link.mode = mode_from_index(mpos)
         changed = true
     end
 
@@ -1835,57 +1906,98 @@ local function draw_ui()
     end
 
     imgui.text("New link")
+    local loadouts = saved_loadouts()
     if #choices == 0 then
         ui_text_colored("no item loadouts found - load a save first", 0xFF8080FF)
     else
-        if ui.set_index > #choices - 1 then ui.set_index = 0 end
-        imgui.text("Item set:")
-        imgui.same_line()
-        if imgui.button("<##new_prev") then
-            ui.set_index = cycle(ui.set_index, -1, #choices)
-        end
-        imgui.same_line()
-        imgui.text("[" .. choices[ui.set_index + 1].name .. "]")
-        imgui.same_line()
-        if imgui.button(">##new_next") then
-            ui.set_index = cycle(ui.set_index, 1, #choices)
-        end
-
-        imgui.text("Match:")
-        imgui.same_line()
-        if imgui.button("<##new_mprev") then
-            ui.mode_index = cycle(ui.mode_index, -1, #MODES + 1)
-        end
-        imgui.same_line()
-        imgui.text("[" .. mode_label_at(ui.mode_index) .. "]")
-        imgui.same_line()
-        if imgui.button(">##new_mnext") then
-            ui.mode_index = cycle(ui.mode_index, 1, #MODES + 1)
+        if #loadouts == 0 then
+            ui_text_colored("no saved equipment loadouts found", 0xFF8080FF)
+        else
+            local names = {}
+            for _, l in ipairs(loadouts) do
+                names[#names + 1] = string.format("%s (#%d)", l.name, l.index)
+            end
+            local ai = labeled_dropdown("Armour set to link", "##new_armor",
+                ui.armor_index, names)
+            if ai ~= nil then ui.armor_index = ai end
         end
 
-        if imgui.button("Link current build") then
+        local si = labeled_dropdown("Item set", "##new_set",
+            ui.set_index, item_set_labels(choices))
+        if si ~= nil then ui.set_index = si end
+
+        local mi = labeled_dropdown("Match", "##new_mode",
+            ui.mode_index, mode_labels())
+        if mi ~= nil then ui.mode_index = mi end
+
+        if #loadouts > 0
+            and imgui.button("Link selected armour set##link_loadout") then
+            local entry = loadouts[(ui.armor_index or 0) + 1]
+            local set = entry and myset_by_index(entry.index)
+            local sig, err = signature_from_myset(set)
+            local target = choice_index(choices, ui.set_index or 0)
+            if entry == nil then
+                notify("no armour set selected")
+            elseif sig == nil then
+                notify("cannot link that loadout: " .. tostring(err))
+            elseif target == nil then
+                notify("no item set selected")
+            else
+                local mode = mode_from_index(ui.mode_index)
+                local forced = nil
+                -- A saved loadout has no weapon roll fields, and the game does
+                -- not store decorations on every record the same way, so a link
+                -- built from one matches on armour pieces + charm type. Tighten
+                -- it in the row's Match dropdown once it is proven in game.
+                if mode == "full" or mode == "inherit" or mode == "no_weapon" then
+                    mode = "gear"
+                    forced = true
+                end
+                local link = normalize_link({
+                    id = tostring(os.time()) .. tostring(math.random(999)),
+                    label = entry.name,
+                    mode = mode,
+                    item_set = target,
+                    item_set_name = item_set_name(target),
+                    apply_mode = "exact",
+                    origin = "loadout",
+                    sig = sig,
+                })
+                if link == nil then
+                    notify("cannot read that loadout's armour")
+                else
+                    config.links[#config.links + 1] = link
+                    changed = true
+                    notify("linked " .. entry.name .. " -> "
+                        .. tostring(link.item_set_name or link.item_set)
+                        .. (forced and " (armour + charm)" or ""))
+                end
+            end
+        end
+
+        if imgui.button("Link current build##link_current") then
             local sig, err = current_signature()
+            local target = choice_index(choices, ui.set_index or 0)
             if sig == nil then
                 notify("cannot read the current build: " .. tostring(err))
+            elseif target == nil then
+                notify("no item set selected")
             else
                 local name, _, quality = game_loadout_name(sig)
                 local label = name
                     and (quality == "full" and name or (name .. " (armour)"))
                     or ("Custom build " .. os.date("%H:%M"))
-                local target = choice_index(choices, ui.set_index)
                 local link = normalize_link({
                     id = tostring(os.time()) .. tostring(math.random(999)),
                     label = label,
                     mode = mode_from_index(ui.mode_index),
                     item_set = target,
-                    item_set_name = item_set_name(target or 0),
+                    item_set_name = item_set_name(target),
                     apply_mode = "exact",
                     sig = sig,
                 })
                 if link == nil then
                     notify("could not read enough of the build to link it")
-                elseif target == nil then
-                    notify("no item set selected")
                 else
                     config.links[#config.links + 1] = link
                     state.last_sig = sig
@@ -1895,31 +2007,26 @@ local function draw_ui()
                 end
             end
         end
-        imgui.same_line()
-        if imgui.button("Apply now") then
+        if imgui.button("Apply now##apply_now") then
             state.dirty = true
             fire("manual")
         end
     end
 
     imgui.separator()
-    imgui.text("Default item set when no link matches:")
-    imgui.same_line()
-    local default_pos = (choice_pos(choices, config.default_item_set) or -1) + 1
-    if imgui.button("<##def_prev") then
-        default_pos = cycle(default_pos, -1, #choices + 1)
-        config.default_item_set = (default_pos == 0) and nil
-            or choice_index(choices, default_pos - 1)
-        changed = true
-    end
-    imgui.same_line()
-    imgui.text("[" .. (config.default_item_set and
-        tostring(item_set_name(config.default_item_set) or "?") or "(none)") .. "]")
-    imgui.same_line()
-    if imgui.button(">##def_next") then
-        default_pos = cycle(default_pos, 1, #choices + 1)
-        config.default_item_set = (default_pos == 0) and nil
-            or choice_index(choices, default_pos - 1)
+    local default_labels = { "(none)" }
+    for _, c in ipairs(choices) do default_labels[#default_labels + 1] = c.name end
+    local dpos = nil
+    local cur = choice_pos(choices, config.default_item_set)
+    if cur ~= nil then dpos = cur + 1 else dpos = 0 end
+    local np = labeled_dropdown("Default item set when no link matches",
+        "##default_set", dpos, default_labels)
+    if np ~= nil then
+        if np == 0 then
+            config.default_item_set = nil
+        else
+            config.default_item_set = choice_index(choices, np - 1)
+        end
         changed = true
     end
 
@@ -1996,6 +2103,7 @@ LR._test = {
     poll = poll,
     fire = fire,
     current_signature = current_signature,
+    signature_from_myset = signature_from_myset,
     game_loadout_name = game_loadout_name,
     piece_key = piece_key,
     item_set_contents = item_set_contents,

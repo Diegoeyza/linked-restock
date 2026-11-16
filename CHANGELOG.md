@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.7 — dropdowns, and linking a saved armour set
+
+Two requests from the live install:
+
+- The pickers are **dropdowns** again. They were combos in 0.1.5, but a combo
+  sharing a line with its label was pushed off the panel edge; each dropdown now
+  takes its own line at the panel's available width, so it cannot be clipped and
+  a long list (many item sets, 64 loadout slots) scrolls normally.
+- **Link an armour set without wearing it.** New link now has two selectors: a
+  saved equipment loadout, and the item set, plus the match mode. "Link selected
+  armour set" builds the link's signature straight from the saved my-set.
+  "Link current build" still captures the worn gear with full weapon data.
+
+Because a saved my-set has no weapon roll fields, and the game does not write
+decorations to every record the same way, a loadout-built link defaults to
+**armour + charm**: the five armour pieces plus the charm's amulet type. The
+row's Match dropdown can be tightened to *armour + skills* (jewels compare by
+equipment slot) or loosened to *armour pieces only*. Worn-gear links are
+unchanged and keep full fidelity.
+
+Also:
+
+- The charm is compared by amulet type for loadout links, so a charm the my-set
+  records without its rolled-skill array still matches the worn one.
+- Skill arrays ignore trailing empty slots (`{158,-1,-1}` and `{158}` are the
+  same piece, and a my-set does not always keep the zero padding).
+- **Re-link once after this update**: the signature text changed, so links made
+  with 0.1.6 and earlier will not match.
+
 ## 0.1.6 — controls that cannot be clipped
 
 Reported in game: "it is not letting me make a new link, it does not let me

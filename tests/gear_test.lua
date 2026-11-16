@@ -178,22 +178,37 @@ local function rebuild_world(index_base)
     -- two saved loadouts sharing the same five armour pieces: "Omega" is the
     -- decoy (different secondary weapon and a different charm), the real one is
     -- "Guardian Arkveld". A label that only looks at armour picks Omega.
+    -- my-sets keep the decorations of each piece (the live probe shows them),
+    -- which is what makes a loadout-built link comparable to the worn gear
+    local myset_jewels = {
+        { 158, -1, -1 }, { 158, -1, -1 }, { 157, 132, 160 },
+        { 157, -1, -1 }, { 123, 167, -1 },
+    }
+    -- the array order is the slot order (probe: 1 weapon, 2..6 armour, 7 charm,
+    -- 8 reserve weapon, 9 specialized equipment)
     local function make_myset(name, weapon2_id, charm_type)
         local pieces = {}
+        pieces[1] = object("app.savedata.cMysetEquipWork", {
+            Category = 1, FreeVal0 = 3, FreeVal1 = 441, IsNone = 0,
+            EquipmentAccessoryIdArray = int_array({ 235, 2, 0 }),
+        })
         for i = 0, 4 do
             pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
                 Category = 0, FreeVal0 = ({ 39, 39, 168, 196, 198 })[i + 1],
                 FreeVal1 = i, IsNone = 0,
+                EquipmentAccessoryIdArray = int_array(myset_jewels[i + 1]),
             })
         end
-        pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
-            Category = 1, FreeVal0 = 3, FreeVal1 = 441, IsNone = 0,
-        })
-        pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
-            Category = 1, FreeVal0 = 6, FreeVal1 = weapon2_id, IsNone = 0,
-        })
-        pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
+        pieces[7] = object("app.savedata.cMysetEquipWork", {
             Category = 2, FreeVal0 = charm_type, FreeVal1 = 2, IsNone = 0,
+            EquipmentAccessoryIdArray = int_array({ 5, 258 }),
+        })
+        pieces[8] = object("app.savedata.cMysetEquipWork", {
+            Category = 1, FreeVal0 = 6, FreeVal1 = weapon2_id, IsNone = 0,
+            EquipmentAccessoryIdArray = int_array({ 236, 82, 45 }),
+        })
+        pieces[9] = object("app.savedata.cMysetEquipWork", {
+            Category = 3, FreeVal0 = 2, FreeVal1 = 0, IsNone = 0,
         })
         return object("app.savedata.cEquipMyset", {
             _MysetParam = object("app.savedata.cMysetBaseParam", {
@@ -452,6 +467,33 @@ local name2 = T.game_loadout_name(sig2)
 eq(name2, "Guardian Arkveld", "and the loadout label is still found")
 
 -- ---------------------------------------------------------------------------
+
+-- 10) a link built from a saved loadout matches the worn build without
+--     wearing it: armour + jewels + charm type, no weapon roll data
+local save3 = sdm.getCurrentUserSaveData()
+local myset2 = save3._f._Equip._f._EquipMySet._items[2]
+local msig, msrc = T.signature_from_myset(myset2)
+check(msig ~= nil, "a saved loadout gives a signature (" .. tostring(msrc) .. ")")
+eq(#msig.armor, 5, "with its five armour pieces")
+
+local loadout_link = T.normalize_link({
+    id = "loadout1", label = "Guardian Arkveld", mode = "no_weapon",
+    item_set = 1, item_set_name = "Base", origin = "loadout", sig = msig,
+})
+check(loadout_link ~= nil, "the loadout link normalises")
+eq(loadout_link.origin, "loadout", "and keeps its origin")
+
+local worn = T.current_signature()
+local m1 = T.resolve_link(worn, { loadout_link }, { ignore_weapons = true })
+check(m1 ~= nil, "the loadout link matches the worn build under no_weapon")
+
+loadout_link.mode = "gear"
+local m2 = T.resolve_link(worn, { loadout_link }, { ignore_weapons = true })
+check(m2 ~= nil, "armour + charm mode matches too")
+
+loadout_link.mode = "full"
+local m3 = T.resolve_link(worn, { loadout_link }, { ignore_weapons = false })
+check(m3 == nil, "in full mode it cannot match (my-sets have no weapon rolls)")
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end

@@ -34,13 +34,18 @@ the thing to adjust — it is one function, near the top of the gear section.
 
 ## 1. Basic link and apply
 
-1. Equip a saved armour loadout, pick an item loadout, press **Link current
-   build**.
-2. **Preview** on the link: the change list must match what you would expect
-   from the item set, and nothing may be listed as missing unless the box really
-   is short.
-3. **Apply now**: the pouch contents change, the panel says `restocked …`, and
+1. Pick a saved armour set and an item set in **New link**, press **Link
+   selected armour set** (do not wear it: this path must stand on its own).
+2. Equip the same armour loadout in game without touching the panel.
+3. **Preview** on the link: it must list the same changes as for a worn-gear
+   link, and the panel's `Matched:` line must name that link. If `Matched:`
+   stays on `nothing yet`, the loadout-built signature does not line up with the
+   worn gear — tighten/loosen the row's **Match** mode once and report the two
+   keys from Diagnostics.
+4. **Apply now**: the pouch contents change, the panel says `restocked …`, and
    the box count drops by the amount moved.
+5. Repeat with **Link current build** while wearing it: both kinds of link must
+   Preview and Apply the same item set.
 
 ## 2. The client's bug: weapon swap
 
