@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.7 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.8 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -75,6 +75,13 @@ Linked Restock matches on what actually defines the build:
 4. Tick **Quest accepted** and/or **Back in the hub**.
 5. Press **Preview** on the link to see exactly what will change, then
    **Apply** to try it immediately.
+
+Both dropdowns list every slot the save has. A set is shown as `Name (18)`, or
+as `Slot #7 (18 items)` when its name cannot be read, so a set the mod cannot
+name is never unreachable; empty slots come last as `Slot #9 (empty)`. The line
+under the item-set dropdown repeats the chosen slot and item count. If a set you
+just created is missing, press **Reload lists** (the lists are cached for a
+second).
 
 The panel shows what the mod sees: the armour count, the charm, how many
 skills, the weapon, and the game loadout the build belongs to. If it says

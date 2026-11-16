@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.8 — every set is selectable, and the pickers report what they see
+
+Reported in game: "it still does not let me select the HH item set from the
+dropdown". A combo whose list omits (or mislabels) one set cannot select it, and
+the panel gave no way to tell which case it was. Both pickers now list every
+slot the save has:
+
+- **Item set** lists the sets that have a name or items first, labelled
+  `Name (18)`; slots the mod cannot name are still there as
+  `Slot #7 (18 items)`, and empty slots as `Slot #9 (empty)`.
+- **Armour set** likewise lists every equipment loadout slot: `Name (#2)` for
+  the ones with five readable armour pieces, `Slot #12 (no armour read)` for the
+  rest.
+- Under the item-set dropdown the panel prints the chosen slot and its item
+  count, so a pick that did not take is visible immediately.
+- **Diagnostics** prints the item sets and equipment loadouts the mod found
+  (index, name, count) instead of a bare total, plus a **Reload lists** button
+  that drops both caches after you create a set in game.
+- Picking an entry logs the position and name when *Debug log* is on.
+
+The lists are cached for a second (the pickers read 64 slots x 64 items), so a
+set created in game shows up on the next second or after **Reload lists**.
+
 ## 0.1.7 — dropdowns, and linking a saved armour set
 
 Two requests from the live install:

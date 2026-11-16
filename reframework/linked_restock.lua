@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.7"
+local VERSION = "0.1.8"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -614,14 +614,15 @@ local function saved_loadouts()
                 elseif cat == CAT_CHARM then charm = charm_id_of(w) end
             end
         end
-        if #armor > 0 then
-            list[#list + 1] = {
-                index = i, name = name,
-                armor = table.concat(sorted_list(armor), "|"),
-                weapons = table.concat(sorted_list(weapons), "|"),
-                charm = charm,
-            }
-        end
+        -- every slot is kept: a loadout the mod cannot read still has to be
+        -- selectable by slot number (armor = "" keeps it out of name matching)
+        list[#list + 1] = {
+            index = i, name = name,
+            armor = table.concat(sorted_list(armor), "|"),
+            armor_count = #armor,
+            weapons = table.concat(sorted_list(weapons), "|"),
+            charm = charm,
+        }
     end
     saved_loadout_cache = { at = now, list = list }
     return list
@@ -1633,27 +1634,54 @@ local ui = {
     show_diag = false,
 }
 
--- Only the item sets that exist: the game keeps a fixed 64-slot array with
--- empty entries, and the probe showed 3 real sets in a full save. The original
--- index is kept because that is what the apply call takes.
+-- Every item-set slot, used first. A fixed 64-slot array holds the sets, and a
+-- set the mod cannot name still has to be pickable, so unnamed and empty slots
+-- are listed after the real ones as "Slot #n" instead of being hidden.
+-- The original index is kept because that is what the apply call takes.
+local item_choice_cache = { at = -1, list = {} }
+
 local function item_set_choices()
-    local out = {}
+    local now = os.clock()
+    if item_choice_cache.at >= 0 and (now - item_choice_cache.at) < 1.0 then
+        return item_choice_cache.list
+    end
+    local real, empty = {}, {}
     for i, set in ipairs(item_sets()) do
         local name = safe_str(field_value(set, "Name")) or ""
-        local has_items = false
+        local count = 0
         for _, w in ipairs(collect(field_value(set, "_PouchItem"), 64)) do
             local id = enum_number(field_value(w, "ItemIdFixed"))
             local n = enum_number(field_value(w, "Num")) or 0
-            if id ~= nil and id ~= 0 and n > 0 then has_items = true break end
+            if id ~= nil and id ~= 0 and n > 0 then count = count + 1 end
         end
-        if has_items or name ~= "" then
-            out[#out + 1] = {
-                index = i,
-                name = (name ~= "" and name) or ("Item set " .. tostring(i)),
-            }
+        local entry = {
+            index = i,
+            name = (name ~= "" and name) or ("Slot #" .. tostring(i)),
+            count = count,
+            named = (name ~= ""),
+        }
+        if name ~= "" or count > 0 then
+            real[#real + 1] = entry
+        else
+            empty[#empty + 1] = entry
         end
     end
+    local out = real
+    for _, e in ipairs(empty) do out[#out + 1] = e end
+    item_choice_cache = { at = now, list = out }
     return out
+end
+
+-- label for one item-set choice: name, item count, and the slot when unnamed
+local function item_set_label(c)
+    if c == nil then return "?" end
+    if c.named then
+        return string.format("%s  (%d)", c.name, c["count"] or 0)
+    end
+    if (c["count"] or 0) > 0 then
+        return string.format("%s  (%d items)", c.name, c["count"])
+    end
+    return c.name .. "  (empty)"
 end
 
 local function choice_pos(choices, index)
@@ -1688,7 +1716,7 @@ end
 
 local function item_set_labels(choices)
     local out = {}
-    for _, c in ipairs(choices) do out[#out + 1] = c.name end
+    for _, c in ipairs(choices) do out[#out + 1] = item_set_label(c) end
     return out
 end
 
@@ -1907,32 +1935,67 @@ local function draw_ui()
 
     imgui.text("New link")
     local loadouts = saved_loadouts()
+    local loadout_choices = {}
     if #choices == 0 then
         ui_text_colored("no item loadouts found - load a save first", 0xFF8080FF)
     else
-        if #loadouts == 0 then
-            ui_text_colored("no saved equipment loadouts found", 0xFF8080FF)
-        else
-            local names = {}
-            for _, l in ipairs(loadouts) do
-                names[#names + 1] = string.format("%s (#%d)", l.name, l.index)
+        -- every my-set slot, usable ones first: a loadout the reader cannot
+        -- parse is still selectable by slot instead of disappearing
+        local loadout_labels = {}
+        local empty_loadouts = {}
+        for _, l in ipairs(loadouts) do
+            if (l.armor_count or 0) > 0 then
+                loadout_choices[#loadout_choices + 1] = l
+                loadout_labels[#loadout_labels + 1] =
+                    string.format("%s  (#%d)", l.name, l.index)
+            else
+                empty_loadouts[#empty_loadouts + 1] = l
             end
+        end
+        for _, l in ipairs(empty_loadouts) do
+            loadout_choices[#loadout_choices + 1] = l
+            loadout_labels[#loadout_labels + 1] =
+                string.format("Slot #%d  (no armour read)", l.index)
+        end
+        if #loadout_choices == 0 then
+            ui_text_colored("no equipment loadout slots found", 0xFF8080FF)
+        else
             local ai = labeled_dropdown("Armour set to link", "##new_armor",
-                ui.armor_index, names)
-            if ai ~= nil then ui.armor_index = ai end
+                ui.armor_index, loadout_labels)
+            if ai ~= nil then
+                ui.armor_index = ai
+                if config.debug then
+                    log.info("[LinkedRestock] armour dropdown -> slot "
+                        .. tostring(loadout_choices[ai + 1] and
+                            loadout_choices[ai + 1].index))
+                end
+            end
         end
 
         local si = labeled_dropdown("Item set", "##new_set",
             ui.set_index, item_set_labels(choices))
-        if si ~= nil then ui.set_index = si end
+        if si ~= nil then
+            ui.set_index = si
+            if config.debug then
+                log.info("[LinkedRestock] item set dropdown -> pos " .. tostring(si)
+                    .. " = " .. item_set_label(choices[si + 1]))
+            end
+        end
+
+        local cur_set = choices[(ui.set_index or 0) + 1]
+        if cur_set ~= nil then
+            imgui.text(string.format("  -> slot #%d, %d items%s",
+                cur_set.index, cur_set["count"] or 0,
+                cur_set.named and "" or " (unnamed)"))
+        end
 
         local mi = labeled_dropdown("Match", "##new_mode",
             ui.mode_index, mode_labels())
         if mi ~= nil then ui.mode_index = mi end
 
-        if #loadouts > 0
+        if #loadout_choices > 0
             and imgui.button("Link selected armour set##link_loadout") then
-            local entry = loadouts[(ui.armor_index or 0) + 1]
+            local entry = loadout_choices[(ui.armor_index or 0) + 1]
             local set = entry and myset_by_index(entry.index)
             local sig, err = signature_from_myset(set)
             local target = choice_index(choices, ui.set_index or 0)
@@ -2045,11 +2108,34 @@ local function draw_ui()
                 .. " (" .. table.concat(state.last_sig.weapon_ids or {}, " ") .. ")"
                 .. " | charm " .. tostring(state.last_sig.charm_id or "-"))
         end
-        imgui.text("item sets: " .. tostring(#choices) .. " real / "
+        local nreal = 0
+        for _, c in ipairs(choices) do
+            if c.named or (c["count"] or 0) > 0 then nreal = nreal + 1 end
+        end
+        imgui.text("item sets: " .. tostring(nreal) .. " real / "
             .. tostring(#item_sets()) .. " slots")
+        for pos, c in ipairs(choices) do
+            if pos <= 10 and (c.named or (c["count"] or 0) > 0) then
+                imgui.text(string.format("  #%d %s - %d items", c.index,
+                    tostring(c.name), c["count"] or 0))
+            end
+        end
+        imgui.text("equipment loadouts: " .. tostring(#loadout_choices) .. " slots")
+        for pos, l in ipairs(loadout_choices) do
+            if pos <= 10 and (l.armor_count or 0) > 0 then
+                imgui.text(string.format("  #%d %s - %d armour", l.index,
+                    tostring(l.name), l.armor_count))
+            end
+        end
         imgui.text("pouch slots: " .. tostring(#pouch_works())
             .. " | box slots: " .. tostring(#box_works()))
         imgui.text("apply candidates: " .. tostring(#apply_candidates()))
+        if imgui.button("Reload lists##reload_lists") then
+            item_choice_cache = { at = -1, list = {} }
+            saved_loadout_cache = { at = -1, list = {} }
+            item_name_cache = {}
+            notify("re-read item sets and loadouts")
+        end
         if imgui.button("Export links") then
             safe(function()
                 json.dump_file(LINKS_FILE, { version = VERSION, links = config.links })
