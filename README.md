@@ -109,7 +109,7 @@ skills, the weapon, and the game loadout the build belongs to. If it says
 - `tools/loadout_probe.lua` — read-only discovery probe (gear, item sets, apply
   candidates). Run it in the hub; it writes four JSON files to
   `reframework/data/`.
-- `tests/` — offline tests under Lua 5.1 (150 assertions):
+- `tests/` — offline tests under Lua 5.1 (155 assertions):
   - `logic_test.lua`: signature keys, match modes, link resolution,
     diff/preview, link normalisation.
   - `pipeline_test.lua`: the apply pipeline and trigger state machine against a

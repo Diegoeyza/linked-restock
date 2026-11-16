@@ -47,7 +47,7 @@ Built from `linked_restock_probe_*.json` on the live build (2026-11-15).
   the original index the apply call expects.
 - Panel: "N jewel slots" instead of a skill count; the diagnostics show the slot
   layout score.
-- Tests: 155 assertions (logic 80, pipeline 44, gear 27); `gear_test.lua` now
+- Tests: 155 assertions (logic 80, pipeline 44, gear 31); `gear_test.lua` now
   mirrors the probe's slot layout and asserts the confirmed apply call runs.
 
 ## 0.1.0 — first build
@@ -77,4 +77,4 @@ weapon-swap problem.
 - `tools/loadout_probe.lua`: read-only discovery probe for gear, item sets,
   apply candidates and item names.
 - Offline test suite for the pure logic (signature keys, mode selection, link
-  resolution, diff/preview, normalisation) — 150 assertions under Lua 5.1.
+  resolution, diff/preview, normalisation) — 155 assertions under Lua 5.1.
