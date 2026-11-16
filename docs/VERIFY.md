@@ -2,7 +2,7 @@
 
 The pure logic, the apply pipeline (against a fake save) and the build capture
 plus client scenario (against a fake catalogue) are covered by `tests/`
-(155 assertions, Lua 5.1). What cannot be faked is the game itself: every real
+(158 assertions, Lua 5.1). What cannot be faked is the game itself: every real
 SDK path has to be verified on the machine that runs it. This is
 the order that finds problems fastest.
 
@@ -96,5 +96,5 @@ the thing to adjust — it is one function, near the top of the gear section.
 ## Regression checks after any edit
 
 - `luac -p reframework/linked_restock.lua` (Lua 5.1) — no modern syntax.
-- `LUA=… ./tests/run.sh` — 155 assertions stay green.
+- `LUA=… ./tests/run.sh` — 158 assertions stay green.
 - Panel opens without a Lua error in `reframework/REFramework_log.txt`.

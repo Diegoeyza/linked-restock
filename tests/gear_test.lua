@@ -177,25 +177,39 @@ local function rebuild_world(index_base)
         index[i] = pos < 0 and -1 or (pos + index_base)
     end
 
-    -- one saved equipment loadout with the same armour, for the label
-    local myset_pieces = {}
-    for i = 0, 4 do
-        myset_pieces[#myset_pieces + 1] = object("app.savedata.cMysetEquipWork", {
-            Category = 0, FreeVal0 = ({ 39, 39, 168, 196, 198 })[i + 1],
-            FreeVal1 = i, IsNone = 0,
+    -- two saved loadouts sharing the same five armour pieces: "Omega" is the
+    -- decoy (different secondary weapon and a different charm), the real one is
+    -- "Guardian Arkveld". A label that only looks at armour picks Omega.
+    local function make_myset(name, weapon2_id, charm_type)
+        local pieces = {}
+        for i = 0, 4 do
+            pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
+                Category = 0, FreeVal0 = ({ 39, 39, 168, 196, 198 })[i + 1],
+                FreeVal1 = i, IsNone = 0,
+            })
+        end
+        pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
+            Category = 1, FreeVal0 = 3, FreeVal1 = 441, IsNone = 0,
+        })
+        pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
+            Category = 1, FreeVal0 = 6, FreeVal1 = weapon2_id, IsNone = 0,
+        })
+        pieces[#pieces + 1] = object("app.savedata.cMysetEquipWork", {
+            Category = 2, FreeVal0 = charm_type, FreeVal1 = 2, IsNone = 0,
+        })
+        return object("app.savedata.cEquipMyset", {
+            _MysetParam = object("app.savedata.cMysetBaseParam", {
+                MysetName = name, IsEmpty = 0,
+            }),
+            _MysetEquipWork = array(pieces),
         })
     end
-    local myset = object("app.savedata.cEquipMyset", {
-        _MysetParam = object("app.savedata.cMysetBaseParam", {
-            MysetName = "Guardian Arkveld", IsEmpty = 0,
-        }),
-        _MysetEquipWork = array(myset_pieces),
-    })
+    local myset = make_myset("Guardian Arkveld", 85, 192)
 
     local equip = object("app.savedata.cEquipParam", {
         _EquipBox = array(box),
         _EquipIndex = object("app.savedata.cEquipIndex", { Index = int_array(index) }),
-        _EquipMySet = array({ myset }),
+        _EquipMySet = array({ make_myset("Omega", 99, 191), myset }),
         _CharmEquipped = object("app.savedata.cCharmEquipped", { MainCharm = 192 }),
     })
 
@@ -360,11 +374,14 @@ eq(sig.jewel_count, 5, "five armour jewel slots")
 check(sig.charm ~= nil, "the charm is part of the signature")
 check(sig.weapon ~= nil and sig.weapon ~= "", "the weapons are part of the signature")
 
--- 2) the saved loadout name is found by armour, even though one piece carries
---    upgrade/reinforcement fields the saved loadout does not record
-local name, index = T.game_loadout_name(sig)
-eq(name, "Guardian Arkveld", "the saved loadout name is used as the label")
-eq(index, 1, "and its index is reported")
+-- 2) the label matches the whole gear, not just the armour: "Omega" shares the
+--    five armour pieces but has a different secondary weapon and charm, and is
+--    listed first. One piece also carries upgrade fields the loadout does not
+--    record -- that must not matter either.
+local name, index, quality = T.game_loadout_name(sig)
+eq(name, "Guardian Arkveld", "the exact loadout wins over the armour-only one")
+eq(index, 2, "and its index is reported")
+eq(quality, "full", "the match is exact")
 
 -- 3) link it and restock through the confirmed apply call
 T.get_config().links = {
@@ -388,6 +405,10 @@ T.state.task = nil
 eq(T.fire("test"), false, "a weapon swap refuses a strict link")
 check(T.state.task == nil, "nothing is applied on a refused match")
 check(T.state.last_result:find("no link") ~= nil, "and the panel says why")
+local swap_sig = T.current_signature()
+local swap_name, _, swap_quality = T.game_loadout_name(swap_sig)
+check(swap_name ~= nil, "the armour still identifies a loadout")
+eq(swap_quality, "armor", "but only as a partial (charm/weapons differ)")
 
 -- 5) with Ignore weapons the same build still matches, and restocks
 T.get_config().ignore_weapons = true

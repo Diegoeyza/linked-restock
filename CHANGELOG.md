@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.4 — the loadout label matches the whole gear
+
+Reported in game: the panel named the "Omega" loadout while the worn set was a
+different loadout that shares the same five armour pieces but has another
+secondary weapon and another charm.
+
+- The label now tries a whole-gear match first (same armour, same charm type,
+  same weapons). Only if no saved loadout matches does it fall back to the
+  armour, and then it says so: `same armour as Omega (#2) - charm/weapons
+  differ`. It never presents a partial match as exact again.
+- Charm identity for the label is the amulet type only (`FreeVal0`): `FreeVal1`
+  means different things in a worn work and in a saved my-set.
+- Links made from a partial match are labelled `<name> (armour)`.
+- Tests: 158 assertions (a decoy loadout with the same armour is listed first
+  and must not steal the name; a weapon swap degrades the label to partial).
+
 ## 0.1.3 — loadout label, armour upgrades, visible Refresh
 
 Follow-up from the in-game report: weapons read correctly but the worn loadout

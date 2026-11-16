@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.3"
+local VERSION = "0.1.4"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -546,6 +546,16 @@ local function piece_identity(obj)
     return string.format("%s:%d:%d", cat, f0, f1)
 end
 
+-- Charm identity for the loadout label: the amulet type (FreeVal0). FreeVal1
+-- means different things in a worn work and in a saved my-set, so it is not
+-- used here; the rolled skills are compared by the signature, not the label.
+local function charm_id_of(obj)
+    if obj == nil then return nil end
+    local amulet = enum_number(field_value(obj, "FreeVal0"))
+    if amulet == nil then return nil end
+    return "charm:" .. tostring(amulet)
+end
+
 -- A short int16[] of ids (decorations / bowgun mods) as a stable string.
 -- -1 and 0 both mean "empty".
 local function id_array_key(obj, field)
@@ -567,28 +577,48 @@ end
 local last_base_score = nil
 local last_slot_layout = nil
 
--- Armour keys of every saved equipment loadout, cached for a couple of seconds
--- (a base check reads 64 my-sets otherwise).
-local saved_armor_cache = { at = -1, keys = {} }
+-- Every saved equipment loadout, with the parts that identify it: armour
+-- pieces, the charm and the weapons. Cached for two seconds (a base check
+-- otherwise walks 64 my-sets).
+local saved_loadout_cache = { at = -1, list = {} }
 
-local function saved_armor_keys()
+local function saved_loadouts()
     local now = os.clock()
-    if saved_armor_cache.at >= 0 and (now - saved_armor_cache.at) < 2.0 then
-        return saved_armor_cache.keys
+    if saved_loadout_cache.at >= 0 and (now - saved_loadout_cache.at) < 2.0 then
+        return saved_loadout_cache.list
     end
-    local keys = {}
-    for _, set in ipairs(equip_mysets()) do
-        local armor = {}
+    local list = {}
+    for i, set in ipairs(equip_mysets()) do
+        local param = field_value(set, "_MysetParam")
+        local name = param and safe_str(field_value(param, "MysetName"))
+        if name == nil or name == "" then name = "Set " .. tostring(i) end
+        local armor, weapons, charm = {}, {}, nil
         for _, w in ipairs(collect(field_value(set, "_MysetEquipWork"), 16)) do
-            if category_of(w) == CAT_ARMOR then
-                local k = piece_identity(w)
-                if k then armor[#armor + 1] = k end
+            local cat = category_of(w)
+            local id = piece_identity(w)
+            if id ~= nil then
+                if cat == CAT_ARMOR then armor[#armor + 1] = id
+                elseif cat == CAT_WEAPON then weapons[#weapons + 1] = id
+                elseif cat == CAT_CHARM then charm = charm_id_of(w) end
             end
         end
-        if #armor > 0 then keys[#keys + 1] = table.concat(sorted_list(armor), "|") end
+        if #armor > 0 then
+            list[#list + 1] = {
+                index = i, name = name,
+                armor = table.concat(sorted_list(armor), "|"),
+                weapons = table.concat(sorted_list(weapons), "|"),
+                charm = charm,
+            }
+        end
     end
-    saved_armor_cache = { at = now, keys = keys }
-    return keys
+    saved_loadout_cache = { at = now, list = list }
+    return list
+end
+
+local function saved_armor_keys()
+    local out = {}
+    for _, l in ipairs(saved_loadouts()) do out[#out + 1] = l.armor end
+    return out
 end
 
 local function slots_of(works, limit)
@@ -720,7 +750,8 @@ local function current_signature()
     last_gear_source = source
     if works == nil then return nil, tostring(source) end
     local armor, jewels, weapons, armor_ids = {}, {}, {}, {}
-    local charm = nil
+    local weapon_ids = {}
+    local charm, charm_id = nil, nil
     local weapon_labels = {}
     local seen_label = {}
     for slot = 1, 20 do
@@ -736,6 +767,8 @@ local function current_signature()
                     if id then armor_ids[#armor_ids + 1] = id end
                 elseif cat == CAT_WEAPON then
                     weapons[#weapons + 1] = key .. "|" .. piece_skills(w)
+                    local wid_key = piece_identity(w)
+                    if wid_key then weapon_ids[#weapon_ids + 1] = wid_key end
                     local wt = enum_number(field_value(w, "FreeVal0"))
                     local wid = enum_number(field_value(w, "FreeVal1"))
                     local label = wt ~= nil and weapon_name(wt, wid) or nil
@@ -748,6 +781,7 @@ local function current_signature()
                     end
                 elseif cat == CAT_CHARM then
                     charm = key .. "|" .. piece_skills(w)
+                    charm_id = charm_id_of(w)
                 end
             end
         end
@@ -762,6 +796,8 @@ local function current_signature()
     return {
         armor = sorted_list(armor),
         armor_ids = sorted_list(armor_ids),
+        weapon_ids = sorted_list(weapon_ids),
+        charm_id = charm_id,
         jewels = sorted_list(jewels),
         charm = charm,
         weapon = weapon,
@@ -837,36 +873,44 @@ weapon_name = function(wtype, wid)
     return name
 end
 
--- Game loadout name for the build in hand (label only; never used to match).
--- Compares the armour pieces, which both sources normalise to the same keys.
-local loadout_name_cache = { key = nil, name = nil, index = nil }
+-- Which saved loadout the worn gear is, for the panel label only (never used
+-- to match links). Whole-gear first: same armour pieces, same charm and the
+-- same weapons. Failing that, a loadout with the same armour is reported as a
+-- partial match instead of being presented as exact -- several loadouts can
+-- share five armour pieces and differ in the charm or the weapons.
+local loadout_name_cache = { key = nil, name = nil, index = nil, quality = nil }
 
 local function game_loadout_name(sig)
-    if sig == nil then return nil end
-    local live = {}
-    for _, k in ipairs(sig.armor_ids or sig.armor or {}) do live[#live + 1] = k end
-    local want = table.concat(sorted_list(live), "|")
-    if loadout_name_cache.key == want then
-        return loadout_name_cache.name, loadout_name_cache.index
+    if sig == nil then return nil, nil, nil end
+    local key = table.concat({
+        table.concat(sorted_list(sig.armor_ids or {}), "|"),
+        tostring(sig.charm_id or ""),
+        table.concat(sorted_list(sig.weapon_ids or {}), "|"),
+    }, "#")
+    if loadout_name_cache.key == key then
+        return loadout_name_cache.name, loadout_name_cache.index, loadout_name_cache.quality
     end
-    for i, set in ipairs(equip_mysets()) do
-        local param = field_value(set, "_MysetParam")
-        local name = param and safe_str(field_value(param, "MysetName"))
-        if name == nil or name == "" then name = "Set " .. tostring(i) end
-        local armor = {}
-        for _, work in ipairs(collect(field_value(set, "_MysetEquipWork"), 16)) do
-            if category_of(work) == CAT_ARMOR then
-                local key = piece_identity(work)
-                if key then armor[#armor + 1] = key end
+
+    local armor_key = table.concat(sorted_list(sig.armor_ids or {}), "|")
+    local weapon_key = table.concat(sorted_list(sig.weapon_ids or {}), "|")
+    local partial = nil
+    for _, l in ipairs(saved_loadouts()) do
+        if l.armor == armor_key and armor_key ~= "" then
+            if l.weapons == weapon_key and l.charm == sig.charm_id then
+                loadout_name_cache = { key = key, name = l.name, index = l.index,
+                                       quality = "full" }
+                return l.name, l.index, "full"
             end
-        end
-        if #armor > 0 and table.concat(sorted_list(armor), "|") == want then
-            loadout_name_cache = { key = want, name = name, index = i }
-            return name, i
+            if partial == nil then partial = l end
         end
     end
-    loadout_name_cache = { key = want, name = nil, index = nil }
-    return nil, nil
+    if partial ~= nil then
+        loadout_name_cache = { key = key, name = partial.name, index = partial.index,
+                               quality = "armor" }
+        return partial.name, partial.index, "armor"
+    end
+    loadout_name_cache = { key = key, name = nil, index = nil, quality = nil }
+    return nil, nil, nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -1701,9 +1745,17 @@ local function draw_ui()
             sig.armor_count or 0, sig.jewel_count or 0,
             tostring(sig.weapon_label or "no weapon"),
             sig.charm and "set" or "none"))
-        local name, idx = game_loadout_name(sig)
-        imgui.text("Game loadout: " .. (name or "not one of the saved loadouts")
-            .. (idx and (" (#" .. tostring(idx) .. ")") or ""))
+        local name, idx, quality = game_loadout_name(sig)
+        local loadout_line
+        if name == nil then
+            loadout_line = "not one of the saved loadouts"
+        elseif quality == "full" then
+            loadout_line = string.format("%s (#%d)", name, idx)
+        else
+            loadout_line = string.format("same armour as %s (#%d) - charm/weapons differ",
+                name, idx)
+        end
+        imgui.text("Game loadout: " .. loadout_line)
         imgui.same_line()
         if imgui.button("Refresh##refresh_top") then
             state.dirty = true
@@ -1760,8 +1812,10 @@ local function draw_ui()
         if sig == nil then
             notify("cannot read the current build: " .. tostring(err))
         else
-            local name = game_loadout_name(sig)
-            local label = name or ("Custom build " .. os.date("%H:%M"))
+            local name, _, quality = game_loadout_name(sig)
+            local label = name
+                and (quality == "full" and name or (name .. " (armour)"))
+                or ("Custom build " .. os.date("%H:%M"))
             local link = normalize_link({
                 id = tostring(os.time()) .. tostring(math.random(999)),
                 label = label,
