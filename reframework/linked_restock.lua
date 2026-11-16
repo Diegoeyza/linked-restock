@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.22"
+local VERSION = "0.1.23"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1846,7 +1846,6 @@ local function flow_trace(q)
     if tuple ~= last_flow_trace then
         last_flow_trace = tuple
         log.info("[LinkedRestock] flow " .. tuple)
-        dump_api_impl("flow change")
     end
 end
 
@@ -2895,7 +2894,6 @@ LR._test = {
 if not TEST_MODE then
     if not ALREADY_LOADED then
         load_config()
-        safe(function() dump_api_impl("load") end)
         re.on_frame(function()
             local ok, err = pcall(on_frame)
             if not ok then log.warn("[LinkedRestock] on_frame: " .. tostring(err)) end

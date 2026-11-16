@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.23 — cleanup: no debug artefacts left switched on
+
+- The flow API dump is no longer written automatically at load or on every flow
+  change. It stays behind **Diagnostics → Dump flow API** for future debugging;
+  the `flow …` trace line remains, and only with Debug log on.
+- The probe scripts and their JSON (`apply_probe.lua`, `loadout_probe.lua`,
+  `linked_restock_probe_*.json`, `linked_restock_api.json`) are no longer part of
+  the live install. `tools/` keeps them in the repository.
+- Confirmed in the log from the live install: the gate reads
+  `result=false ending=false loading=false` in the hub, and the game call applies
+  (`applyMySetToPouch(3)` for item set 4, 0-based) with no crash.
+
 ## 0.1.22 — the on-screen notice has a background
 
 Reported in game: "the notice needs a background to be able to see it".
