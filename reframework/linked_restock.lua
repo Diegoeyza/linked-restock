@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.17"
+local VERSION = "0.1.18"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -80,7 +80,7 @@ local config = {
     enabled = true,
     debug = false,
     ignore_weapons = false,
-    game_call_on_auto = false, -- automatic restocks write save data only
+    game_call_on_auto = true, -- exact apply once the hub is settled
     notify_missing = true,
     notify = true,
     triggers = { quest_accept = true, hub_return = true },
@@ -1282,6 +1282,8 @@ local state = {
     last_sig_error = nil,
     verdicts = {},       -- [link id] = { sig = <signature table>, why = <text> }
     pending_retry = nil, -- { link, reason, retry, at }: re-run after a failure
+    exact_due = nil,     -- { link }: exact game apply, once the hub is settled
+    settled_polls = 0,   -- consecutive polls of "hub loaded, nothing running"
     last_gear_source = nil,
     dirty = true,
 }
@@ -1402,7 +1404,12 @@ local function load_config()
     if type(cfg) ~= "table" then config = base return end
     if type(cfg.enabled) == "boolean" then base.enabled = cfg.enabled end
     if type(cfg.debug) == "boolean" then base.debug = cfg.debug end
-    if type(cfg.game_call_on_auto) == "boolean" then
+    local cfg_version = type(cfg.version) == "string" and cfg.version or ""
+    if cfg_version ~= "" and cfg_version < "0.1.18" then
+        -- before 0.1.18 this fired at quest end (and could crash); now it waits
+        -- for a loaded hub, so an old "off" is not a decision about this rule
+        base.game_call_on_auto = true
+    elseif type(cfg.game_call_on_auto) == "boolean" then
         base.game_call_on_auto = cfg.game_call_on_auto
     end
     if type(cfg.ignore_weapons) == "boolean" then base.ignore_weapons = cfg.ignore_weapons end
@@ -1480,10 +1487,10 @@ end
 -- write save data only by default: invoking a game method while the game tears a
 -- quest down crashed the client at the end-of-quest screen. The game's own call
 -- is still the manual path, where the player is standing somewhere safe.
-local function strategies_for(link, index, auto)
+local function strategies_for(link, index, auto, exact)
     local list = {}
     local set_obj = item_sets()[index]
-    local may_call_game = (not auto) or config.game_call_on_auto
+    local may_call_game = (not auto) or exact or config.game_call_on_auto
 
     local apply_pouch = may_call_game and static_method("app.ItemMySetUtil",
         "applyMySetToPouch(System.Int32)")
@@ -1535,7 +1542,7 @@ local function world_ready()
     return false
 end
 
-local function start_task(link, reason, retry)
+local function start_task(link, reason, retry, exact)
     state.pending_retry = nil
     local index = link.item_set
     if index == nil then
@@ -1564,7 +1571,8 @@ local function start_task(link, reason, retry)
         missing = missing,
         mode = mode,
         auto = auto,
-        strategies = strategies_for(link, index, auto),
+        exact = exact == true,
+        strategies = strategies_for(link, index, auto, exact),
         try = 1,
         attempts = 0,
         wait = 0,
@@ -1655,6 +1663,7 @@ local function finish_task(ok, detail)
         if (task.retry or 0) < limit and task.link ~= nil then
             state.pending_retry = {
                 link = task.link, reason = task.reason, auto = task.auto,
+                exact = task.exact,
                 retry = (task.retry or 0) + 1, at = state.frames + 240,
             }
             note("will retry " .. label .. " in a few seconds")
@@ -1724,6 +1733,121 @@ end
 -- triggers
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- flow / loading API discovery
+--
+-- The exact item-set call may only be made when the game is completely out of
+-- the quest flow, and `get_IsActiveQuest()` is already false on the results
+-- screen (that is why a 2 s delay crashed the client). Rather than guess a
+-- getter, dump the candidate surface once so the gate can be built on facts.
+-- ---------------------------------------------------------------------------
+
+local API_TYPES = {
+    "app.MissionManager",
+    "app.PlayerManager",
+    "app.GameFlowManager",
+    "app.StageAreaLoadManager",
+    "app.BaseCampSceneManager",
+    "app.cQuestSceneLoading",
+    "app.cQuestLeaveInLoading",
+    "app.cQuestMissionLoading",
+}
+
+-- only these are called for a value: known-safe getters
+local API_VALUES = {
+    { "app.MissionManager", "get_IsPlayingQuest" },
+    { "app.MissionManager", "get_IsActiveQuest" },
+    { "app.MissionManager", "get_ActiveQuestData" },
+    { "app.MissionManager", "get_QuestDirector" },
+    { "app.PlayerManager", "get_Player" },
+    { "app.PlayerManager", "get_IsExistPlayer" },
+    { "app.GameFlowManager", "get_Phase" },
+    { "app.GameFlowManager", "get_CurrentPhase" },
+    { "app.StageAreaLoadManager", "get_IsLoading" },
+    { "app.StageAreaLoadManager", "get_Phase" },
+    { "app.StageAreaLoadManager", "get_State" },
+}
+
+local api_dumped = false
+
+local function dump_api_impl(why)
+    local out = { version = VERSION, why = why,
+                  at = os.date("%Y-%m-%d %H:%M:%S"), types = {}, values = {} }
+    for _, tn in ipairs(API_TYPES) do
+        local td = safe(sdk.find_type_definition, tn)
+        local entry = { found = td ~= nil, methods = {} }
+        if td ~= nil then
+            local singleton = safe(function()
+                return sdk.get_managed_singleton(tn)
+            end)
+            entry.singleton = singleton ~= nil
+            local methods = safe(function() return td:get_methods() end) or {}
+            for _, m in ipairs(methods) do
+                local name = tostring(safe(function() return m:get_name() end) or "")
+                local low = string.lower(name)
+                if low:find("state") or low:find("phase") or low:find("load")
+                    or low:find("result") or low:find("flow") or low:find("quest")
+                    or low:find("camp") or low:find("field") or low:find("hub") then
+                    entry.methods[#entry.methods + 1] = name
+                    if #entry.methods >= 120 then break end
+                end
+            end
+        end
+        out.types[tn] = entry
+    end
+    for _, pair in ipairs(API_VALUES) do
+        local tn, method = pair[1], pair[2]
+        local td = safe(sdk.find_type_definition, tn)
+        local m = td and safe(function() return td:get_method(method .. "()") end)
+        local key = tn .. "." .. method
+        if m == nil then
+            out.values[key] = "no such method"
+        else
+            local obj = safe(function() return sdk.get_managed_singleton(tn) end)
+            if obj == nil then
+                out.values[key] = "no singleton"
+            else
+                local v = safe(function() return m:call(obj) end)
+                if type(v) == "boolean" or type(v) == "number" or type(v) == "string" then
+                    out.values[key] = tostring(v)
+                elseif v == nil then
+                    out.values[key] = "nil"
+                else
+                    out.values[key] = "object(" .. tostring(safe(function()
+                        return v:get_type_definition():get_full_name()
+                    end) or "?") .. ")"
+                end
+            end
+        end
+    end
+    safe(function() json.dump_file("linked_restock_api.json", out) end)
+    if config.debug then
+        for key, v in pairs(out.values) do
+            log.info("[LinkedRestock] api value " .. key .. " = " .. tostring(v))
+        end
+    end
+end
+
+local last_flow_trace = nil
+
+-- one line whenever the flow tuple changes, so a quest can be reconstructed
+-- from the log without logging every poll
+local function flow_trace(q)
+    if not config.debug then return end
+    local mm = safe(function() return sdk.get_managed_singleton("app.MissionManager") end)
+    local active = mm and call_method(mm, "get_IsActiveQuest")
+    local aqd = mm and call_method(mm, "get_ActiveQuestData")
+    local director = mm and call_method(mm, "get_QuestDirector")
+    local tuple = string.format("playing=%s active=%s questdata=%s director=%s",
+        tostring(q), tostring(active), aqd ~= nil and "yes" or "no",
+        director ~= nil and "yes" or "no")
+    if tuple ~= last_flow_trace then
+        last_flow_trace = tuple
+        log.info("[LinkedRestock] flow " .. tuple)
+        dump_api_impl("flow change")
+    end
+end
+
 local function in_quest()
     local mm = safe(function() return sdk.get_managed_singleton("app.MissionManager") end)
     if mm == nil then return nil end
@@ -1783,6 +1907,11 @@ local function fire(reason)
         note("cannot restock: " .. tostring(err2 or "unknown"))
         return false
     end
+    if config.game_call_on_auto and reason == "back in the hub" then
+        -- the top-up above is already safe and immediate; this schedules the
+        -- game's own apply for when the hub is properly loaded
+        state.exact_due = { link = link }
+    end
     return true
 end
 
@@ -1811,6 +1940,24 @@ local function polls_for_frames(frames)
     return math.max(1, math.ceil((frames or 0) / 30))
 end
 
+-- The exact item-set call may only be made when the game is completely out of
+-- the quest flow AND the hub is loaded. IsActiveQuest is already false on the
+-- results screen, so the gate also requires no quest data, no quest director and
+-- readable item data, and it has to hold for a while before anything runs.
+local EXACT_HUB_POLLS = 20 -- ~10 s at the 30-frame poll cadence
+
+local function hub_is_settled()
+    local mm = safe(function()
+        return sdk.get_managed_singleton("app.MissionManager")
+    end)
+    if mm == nil then return false end
+    if call_method(mm, "get_IsPlayingQuest") == true then return false end
+    if call_method(mm, "get_IsActiveQuest") == true then return false end
+    if call_method(mm, "get_ActiveQuestData") ~= nil then return false end
+    if call_method(mm, "get_QuestDirector") ~= nil then return false end
+    return world_ready()
+end
+
 local ACCEPT_POLLS = 2   -- ~1 s: the game initialises the quest pouch first
 local READY_RETRY_POLLS = 40 -- ~20 s of "the item data is not readable yet"
 
@@ -1818,6 +1965,7 @@ local READY_RETRY_POLLS = 40 -- ~20 s of "the item data is not readable yet"
 local function poll()
     local q = in_quest()
     if q == nil then return end
+    safe(function() flow_trace(q) end)
 
     -- first reading after load: remember it, do not treat it as a transition.
     -- Loading the script mid-quest still has to arm the hub return, so that
@@ -1831,6 +1979,7 @@ local function poll()
     if q ~= state.last_in_quest then
         if q == true then
             state.quest_seq = state.quest_seq + 1
+            state.exact_due = nil
             if config.triggers.quest_accept then
                 -- one second after the quest starts: the game initialises the
                 -- quest pouch at the start, and a write before that is lost
@@ -1880,6 +2029,22 @@ local function poll()
     end
     state.hub_polls = in_hub and ((state.hub_polls or 0) + 1) or 0
 
+    local settled = false
+    if q == false then settled = hub_is_settled() end
+    state.settled_polls = settled and ((state.settled_polls or 0) + 1) or 0
+
+    -- once the hub has been loaded and quiet for a while, run the exact pass
+    if state.exact_due ~= nil and state.task == nil and state.pending_retry == nil
+        and state.settled_polls >= EXACT_HUB_POLLS then
+        local due = state.exact_due
+        state.exact_due = nil
+        if config.debug then
+            log.info("[LinkedRestock] hub settled, exact apply for "
+                .. tostring(due.link.label))
+        end
+        start_task(due.link, "back in the hub", 0, true)
+    end
+
     -- Back in the hub: a quest was seen (or we loaded mid-quest) and the game
     -- has been steadily out of one for the configured delay. This does not
     -- depend on catching the exact transition, so a poll missed during loading
@@ -1919,7 +2084,7 @@ local function on_frame()
                 log.info("[LinkedRestock] retrying " .. tostring(r.link.label)
                     .. " (" .. tostring(r.retry) .. ")")
             end
-            start_task(r.link, r.reason, r.retry)
+            start_task(r.link, r.reason, r.retry, r.exact)
         end
     end
     local ok, err = pcall(tick_task)
@@ -2169,7 +2334,6 @@ local function preview(link)
         notify("item set " .. tostring(link.item_set) .. " is missing")
         return
     end
-    local auto = (reason == "quest accepted" or reason == "back in the hub")
     local mode = (link.apply_mode == "topup") and "topup" or "exact"
     local diff, missing = compute_diff(contents, pouch_snapshot(), box_snapshot(), mode)
     ui.show_preview = { link = link, diff = diff, missing = missing, mode = mode }
@@ -2289,11 +2453,11 @@ local function draw_ui()
     imgui.text("  links match on: " .. match_text({ sig = {} }))
     local c4, v4 = imgui.checkbox("Notify missing items", config.notify_missing)
     if c4 then config.notify_missing = v4 changed = true end
-    local c5, v5 = imgui.checkbox("Game call on automatic restock (risky at quest end)",
+    local c5, v5 = imgui.checkbox("Exact game apply after the hub settles",
         config.game_call_on_auto)
     if c5 then config.game_call_on_auto = v5 changed = true end
-    imgui.text("  automatic: " .. (config.game_call_on_auto
-        and "game item-set call, then top-up"
+    imgui.text("  " .. (config.game_call_on_auto
+        and "top-up at the trigger, then the game's own apply ~10 s into a loaded hub"
         or "top-up from the item box only"))
 
     imgui.separator()
@@ -2592,6 +2756,9 @@ local function draw_ui()
         imgui.text("gear source: " .. tostring(state.last_gear_source or "-"))
         imgui.text("slot layout: " .. tostring(last_slot_layout or "-"))
         imgui.text("slot score: " .. tostring(last_base_score or "-"))
+        imgui.text(string.format("hub settled: %d/%d polls%s",
+            state.settled_polls or 0, EXACT_HUB_POLLS,
+            state.exact_due and " (exact apply queued)" or ""))
         if state.last_sig ~= nil then
             imgui.text("worn: armour " .. tostring(#(state.last_sig.armor_ids or {}))
                 .. " | weapons " .. tostring(#(state.last_sig.weapon_ids or {}))
@@ -2620,6 +2787,10 @@ local function draw_ui()
         imgui.text("pouch slots: " .. tostring(#pouch_works())
             .. " | box slots: " .. tostring(#box_works()))
         imgui.text("apply candidates: " .. tostring(#apply_candidates()))
+        if imgui.button("Dump flow API##dump_api") then
+            safe(function() dump_api_impl("button") end)
+            notify("wrote reframework/data/linked_restock_api.json")
+        end
         if imgui.button("Reload lists##reload_lists") then
             item_choice_cache = { at = -1, list = {} }
             saved_loadout_cache = { at = -1, list = {} }
@@ -2702,6 +2873,7 @@ LR._test = {
 if not TEST_MODE then
     if not ALREADY_LOADED then
         load_config()
+        safe(function() dump_api_impl("load") end)
         re.on_frame(function()
             local ok, err = pcall(on_frame)
             if not ok then log.warn("[LinkedRestock] on_frame: " .. tostring(err)) end

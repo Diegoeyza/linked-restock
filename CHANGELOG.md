@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.18 — the exact apply waits for a loaded hub
+
+Requested in game: use the game's own item-set call, "but not at the actual quest
+end — when I am already back in the hub, with no loading screen".
+
+`get_IsActiveQuest()` is already false on the results screen, so the 0.1.15
+version could not tell the two apart and called the game while it was tearing the
+quest down. The automatic path now runs in two stages:
+
+1. **At the trigger** (results screen cleared) it tops the pouch up from the item
+   box, which is a save-data write and cannot crash anything. The pouch is never
+   left unstocked.
+2. **Once the hub is settled** it runs the game's own `applyMySetToPouch`: not in
+   a quest, no active quest, **no active quest data**, **no quest director**, item
+   data readable, and that has to hold for ~10 s (20 polls). Only then is the
+   game call made, and the same gate keeps its retries out of quests.
+
+The panel's Diagnostics shows `hub settled: N/20` and whether an exact apply is
+queued, so the wait is visible.
+
+- The switch is now **Exact game apply after the hub settles** and is on by
+  default; a config written before 0.1.18 has it turned on once, because the old
+  `false` was a reaction to the quest-end crash, not to this rule.
+- The mod now dumps the flow API (`app.MissionManager`, `app.PlayerManager`,
+  `app.GameFlowManager`, `app.StageAreaLoadManager`, ...) to
+  `reframework/data/linked_restock_api.json` on load and whenever the flow tuple
+  changes with Debug log on, so the gate can be tightened on facts if the exact
+  pass still fires too early.
+
 ## 0.1.17 — say what the automatic restock actually does
 
 Wording only: the switch from 0.1.16 is now labelled by its risk and the line
