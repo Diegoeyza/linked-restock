@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.13 — the link list is a collapsed section with a scroll region
+
+Reported in game: with hundreds of possible linked sets, the list pushed the
+rest of the panel off the screen.
+
+- **Links** is now its own collapsible section, closed by default (REFramework
+  remembers the choice per panel). The header line always shows
+  `N saved, M on`, so the state is readable while collapsed.
+- The rows live in a scrolling child region, capped at 260 px, so the panel
+  height no longer grows with the number of links. Builds without the
+  `begin_child_window` binding fall back to a plain list.
+- **Find:** box above the list filters rows by label (case-insensitive).
+- Work per frame no longer scales with the list as badly: the item-set label
+  table is built once per frame instead of once per row, and each row's match
+  verdict is memoised against the worn signature (the gear is re-read twice a
+  second, so verdicts are recomputed at that rate, not every frame).
+- Removed rows drop their cached verdict.
+
 ## 0.1.12 — one matching switch
 
 Reported in game: the per-link **Match** dropdown duplicated the global

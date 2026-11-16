@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.12"
+local VERSION = "0.1.13"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1279,6 +1279,7 @@ local state = {
     last_match = nil,    -- { label, mode, item_set_name }
     last_sig = nil,
     last_sig_error = nil,
+    verdicts = {},       -- [link id] = { sig = <signature table>, why = <text> }
     last_gear_source = nil,
     dirty = true,
 }
@@ -1787,6 +1788,7 @@ end
 local ui = {
     set_index = 0,     -- combo position of the item set to link
     armor_index = 0,   -- combo position of the saved armour loadout to link
+    link_filter = "",  -- find box over the link list
     show_preview = nil,   -- { link=, diff=, missing= }
     show_diag = false,
 }
@@ -1953,6 +1955,22 @@ local function labeled_dropdown(label, id, pos, labels)
     return nil
 end
 
+-- begin_child_window is only in newer REFramework builds. nil = not available,
+-- true = open and visible, false = open but clipped (end_child_window still has
+-- to be called).
+local function child_begin(id, width, height)
+    if type(imgui.begin_child_window) ~= "function" then return nil end
+    local res = safe(function()
+        return { imgui.begin_child_window(id, { width, height }, true) }
+    end)
+    if type(res) ~= "table" then return nil end
+    return res[1] and true or false
+end
+
+local function child_end()
+    safe(function() imgui.end_child_window() end)
+end
+
 local function ui_text_colored(text, color)
     local ok = safe(function() imgui.text_colored(text, color) return true end)
     if ok ~= true then imgui.text(text) end
@@ -1997,7 +2015,7 @@ local function draw_preview()
     if imgui.button("Close##close_preview") then ui.show_preview = nil end
 end
 
-local function draw_link_row(link, i, choices, live_sig)
+local function draw_link_row(link, i, choices, set_labels, live_sig)
     local changed = false
     if imgui.checkbox("##on" .. i, link.enabled ~= false) then
         link.enabled = not link.enabled
@@ -2019,7 +2037,7 @@ local function draw_link_row(link, i, choices, live_sig)
         ui_text_colored("  item set missing - pick one", 0xFF8080FF)
     end
     local pos = labeled_dropdown("  Item set", "##set" .. i,
-        choice_pos(choices, link.item_set), item_set_labels(choices))
+        choice_pos(choices, link.item_set), set_labels)
     if pos ~= nil then
         local idx = choice_index(choices, pos)
         if idx ~= nil then
@@ -2031,7 +2049,15 @@ local function draw_link_row(link, i, choices, live_sig)
 
     imgui.text("  Matching: " .. match_text(link))
 
-    local why = link_mismatch(link, live_sig, config)
+    local why = nil
+    if live_sig ~= nil then
+        local memo = state.verdicts[link.id]
+        if memo == nil or memo.sig ~= live_sig then
+            memo = { sig = live_sig, why = link_mismatch(link, live_sig, config) }
+            state.verdicts[link.id] = memo
+        end
+        why = memo.why
+    end
     if link.enabled == false then
         imgui.text("  (off - not used)")
     elseif live_sig == nil then
@@ -2050,6 +2076,7 @@ local function draw_link_row(link, i, choices, live_sig)
     end
     imgui.same_line()
     if imgui.button("Remove##r" .. i) then
+        state.verdicts[link.id] = nil
         table.remove(config.links, i)
         changed = true
     end
@@ -2148,17 +2175,67 @@ local function draw_ui()
     end
 
     imgui.separator()
-    imgui.text("Links")
     local choices = item_set_choices()
-    if #config.links == 0 then
-        imgui.text("No links yet: wear the build, pick an item set below,")
-        imgui.text("press \"Link current build\".")
+    local set_labels = item_set_labels(choices)
+    local on_count = 0
+    for _, l in ipairs(config.links) do
+        if l.enabled ~= false then on_count = on_count + 1 end
     end
-    for i = #config.links, 1, -1 do
-        if draw_link_row(config.links[i], i, choices, state.last_sig) then
-            changed = true
+    -- stable tree id (no count in the label): the count changes when a link is
+    -- added, and a changing id would collapse the section under the user
+    local links_open = imgui.tree_node("Links##links_box")
+    imgui.same_line()
+    imgui.text(string.format("%d saved, %d on", #config.links, on_count))
+    if links_open then
+        if #config.links == 0 then
+            imgui.text("No links yet: pick an armour set and an item set below,")
+            imgui.text("then press \"Link selected armour set\".")
+        else
+            if type(imgui.input_text) == "function" then
+                imgui.text("Find:")
+                imgui.same_line()
+                safe(function() imgui.set_next_item_width(dropdown_width()) end)
+                local cf, ft = imgui.input_text("##link_find", ui.link_filter or "")
+                if cf then ui.link_filter = ft or "" end
+            end
+            local needle = string.lower(ui.link_filter or "")
+            local rows = {}
+            for i = #config.links, 1, -1 do
+                local l = config.links[i]
+                if needle == ""
+                    or string.find(string.lower(tostring(l.label)), needle, 1, true)
+                        ~= nil then
+                    rows[#rows + 1] = i
+                end
+            end
+            if #rows == 0 then
+                imgui.text("no link matches the find box")
+            else
+                local height = math.min(math.max(#rows, 1) * 110, 260)
+                local visible = child_begin("##links_scroll", 0, height)
+                if visible ~= nil then
+                    if visible then
+                        for _, i in ipairs(rows) do
+                            if draw_link_row(config.links[i], i, choices,
+                                set_labels, state.last_sig) then
+                                changed = true
+                            end
+                            imgui.separator()
+                        end
+                    end
+                    child_end()
+                else
+                    for _, i in ipairs(rows) do
+                        if draw_link_row(config.links[i], i, choices,
+                            set_labels, state.last_sig) then
+                            changed = true
+                        end
+                        imgui.separator()
+                    end
+                end
+            end
         end
-        imgui.separator()
+        imgui.tree_pop()
     end
 
     imgui.text("New link")

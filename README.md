@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.12 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.13 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -36,6 +36,10 @@ Linked Restock matches on what actually defines the build:
 - **One item loadout per build.** Ticking a link switches off every other link
   that would claim the same build, so a link row is unambiguous; keep the
   alternates in the list and tick the one you want.
+- **A long link list stays out of the way.** *Links* is a collapsible section
+  (closed by default, header shows `N saved, M on`) with its own scroll region
+  and a **Find** box, so hundreds of links do not push the rest of the panel
+  off the screen.
 - **One matching switch.** Links always compare the most granular identity —
   armour pieces, skills, charm and weapon — and a single **Ignore weapons**
   checkbox drops the weapon for every link at once. There is no per-link mode to
