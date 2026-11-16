@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.2"
+local VERSION = "0.1.3"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -507,6 +507,14 @@ local function piece_key(obj, depth)
     if cat ~= nil then
         local f0 = enum_number(field_value(obj, "FreeVal0")) or 0
         local f1 = enum_number(field_value(obj, "FreeVal1")) or 0
+        if cat ~= CAT_WEAPON then
+            -- armour/charm identity: the piece itself. Upgrade levels and
+            -- reinforcement must not break a link -- they do not change the
+            -- build, and decorations are captured separately.
+            return string.format("%s:%d:%d", cat, f0, f1)
+        end
+        -- weapons: the roll fields are part of the weapon (Artian perf type,
+        -- created/grinded bonuses), which is what the client asked for.
         local f2 = enum_number(field_value(obj, "FreeVal2")) or 0
         local f3 = enum_number(field_value(obj, "FreeVal3")) or 0
         local bonus_create = enum_number(field_value(obj, "BonusByCreating")) or 0
@@ -525,6 +533,17 @@ local function piece_key(obj, depth)
         end
     end
     return nil
+end
+
+-- The part of the key that says *which* piece this is: category, series/type
+-- and part/id. Upgrade levels and Artian rolls are deliberately left out, so a
+-- live piece still matches the same piece in a saved loadout.
+local function piece_identity(obj)
+    local cat = category_of(obj)
+    if cat == nil then return nil end
+    local f0 = enum_number(field_value(obj, "FreeVal0")) or 0
+    local f1 = enum_number(field_value(obj, "FreeVal1")) or 0
+    return string.format("%s:%d:%d", cat, f0, f1)
 end
 
 -- A short int16[] of ids (decorations / bowgun mods) as a stable string.
@@ -562,7 +581,7 @@ local function saved_armor_keys()
         local armor = {}
         for _, w in ipairs(collect(field_value(set, "_MysetEquipWork"), 16)) do
             if category_of(w) == CAT_ARMOR then
-                local k = piece_key(w)
+                local k = piece_identity(w)
                 if k then armor[#armor + 1] = k end
             end
         end
@@ -645,7 +664,7 @@ local function current_equip_works()
         for slot = 1, 20 do
             local w = works[slot]
             if w ~= nil and category_of(w) == CAT_ARMOR then
-                local k = piece_key(w)
+                local k = piece_identity(w)
                 if k then armor[#armor + 1] = k end
             end
         end
@@ -700,7 +719,7 @@ local function current_signature()
     local works, source = current_equip_works()
     last_gear_source = source
     if works == nil then return nil, tostring(source) end
-    local armor, jewels, weapons = {}, {}, {}
+    local armor, jewels, weapons, armor_ids = {}, {}, {}, {}
     local charm = nil
     local weapon_labels = {}
     local seen_label = {}
@@ -713,6 +732,8 @@ local function current_signature()
                 if cat == CAT_ARMOR then
                     armor[#armor + 1] = key
                     jewels[#jewels + 1] = slot .. "=" .. piece_skills(w)
+                    local id = piece_identity(w)
+                    if id then armor_ids[#armor_ids + 1] = id end
                 elseif cat == CAT_WEAPON then
                     weapons[#weapons + 1] = key .. "|" .. piece_skills(w)
                     local wt = enum_number(field_value(w, "FreeVal0"))
@@ -740,6 +761,7 @@ local function current_signature()
     end
     return {
         armor = sorted_list(armor),
+        armor_ids = sorted_list(armor_ids),
         jewels = sorted_list(jewels),
         charm = charm,
         weapon = weapon,
@@ -821,7 +843,9 @@ local loadout_name_cache = { key = nil, name = nil, index = nil }
 
 local function game_loadout_name(sig)
     if sig == nil then return nil end
-    local want = sig_key({ armor = sig.armor }, "armor")
+    local live = {}
+    for _, k in ipairs(sig.armor_ids or sig.armor or {}) do live[#live + 1] = k end
+    local want = table.concat(sorted_list(live), "|")
     if loadout_name_cache.key == want then
         return loadout_name_cache.name, loadout_name_cache.index
     end
@@ -832,11 +856,11 @@ local function game_loadout_name(sig)
         local armor = {}
         for _, work in ipairs(collect(field_value(set, "_MysetEquipWork"), 16)) do
             if category_of(work) == CAT_ARMOR then
-                local key = piece_key(work)
+                local key = piece_identity(work)
                 if key then armor[#armor + 1] = key end
             end
         end
-        if #armor > 0 and sig_key({ armor = armor }, "armor") == want then
+        if #armor > 0 and table.concat(sorted_list(armor), "|") == want then
             loadout_name_cache = { key = want, name = name, index = i }
             return name, i
         end
@@ -1095,6 +1119,7 @@ local function normalize_link(l)
         local sig = {
             armor = type(l.sig.armor) == "table" and l.sig.armor or {},
             charm = l.sig.charm,
+            armor_ids = type(l.sig.armor_ids) == "table" and l.sig.armor_ids or nil,
             jewels = type(l.sig.jewels) == "table" and l.sig.jewels
                 or (type(l.sig.skills) == "table" and l.sig.skills) or {},
             weapon = l.sig.weapon,
@@ -1664,8 +1689,9 @@ local function draw_ui()
     imgui.separator()
     -- lazily read the build once when the panel is first opened, so the user
     -- does not have to wait for a trigger to see what the mod sees
-    if state.last_sig == nil and not state.sig_attempted then
-        state.sig_attempted = true
+    if state.last_sig == nil
+        and (state.frames - (state.sig_try_frame or -999)) > 120 then
+        state.sig_try_frame = state.frames
         local sig = current_signature()
         if sig ~= nil then state.last_sig = sig end
     end
@@ -1678,6 +1704,16 @@ local function draw_ui()
         local name, idx = game_loadout_name(sig)
         imgui.text("Game loadout: " .. (name or "not one of the saved loadouts")
             .. (idx and (" (#" .. tostring(idx) .. ")") or ""))
+        imgui.same_line()
+        if imgui.button("Refresh##refresh_top") then
+            state.dirty = true
+            state.last_sig = nil
+            state.sig_try_frame = -999
+            item_name_cache = {}
+            loadout_name_cache = { key = nil, name = nil, index = nil }
+            local fresh = current_signature()
+            if fresh ~= nil then state.last_sig = fresh end
+        end
     else
         imgui.text("Current build: (not read yet)")
     end
@@ -1719,7 +1755,7 @@ local function draw_ui()
     local mc, mi = imgui.combo("##new_mode", ui.mode_index, mode_labels())
     if mc then ui.mode_index = mi end
     imgui.same_line()
-    if imgui.button("Link current build") then
+    if imgui.button("Link current build##new_link") then
         local sig, err = current_signature()
         if sig == nil then
             notify("cannot read the current build: " .. tostring(err))
@@ -1747,10 +1783,16 @@ local function draw_ui()
         end
     end
     imgui.same_line()
-    if imgui.button("Refresh##refresh") then
+    if imgui.button("Apply now##apply_now") then
+        state.dirty = true
+        fire("manual")
+    end
+
+    -- second row, so the buttons are always reachable
+    if imgui.button("Refresh build##refresh") then
         state.dirty = true
         item_name_cache = {}
-        changed = false
+        loadout_name_cache = { key = nil, name = nil, index = nil }
         local sig, err = current_signature()
         if sig == nil then
             notify("cannot read the current build: " .. tostring(err))
@@ -1760,7 +1802,7 @@ local function draw_ui()
         end
     end
     imgui.same_line()
-    if imgui.button("Apply now") then
+    if imgui.button("Apply linked set now##apply_linked") then
         state.dirty = true
         fire("manual")
     end

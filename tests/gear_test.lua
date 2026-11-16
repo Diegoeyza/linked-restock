@@ -158,6 +158,11 @@ local function rebuild_world(index_base)
     put(POS.charm, world.charm)
     world.weapon2 = weapon_work(6, 85, 0, 0, { 236, 82, 45 })
     put(POS.weapon2, world.weapon2)
+    -- armour upgrade/reinforcement data on one piece: identity must ignore it
+    box[POS.armor + 3]._f.FreeVal2 = 7
+    box[POS.armor + 3]._f.BonusByCreating = 123
+    box[POS.armor + 3]._f.GrindingNum = 2
+
     local mantle = armor_work(2, 0, { -1, -1, -1 })
     mantle._f.Category_Gender = 17 -- mantle: other category
     put(POS.mantle, mantle)
@@ -355,7 +360,8 @@ eq(sig.jewel_count, 5, "five armour jewel slots")
 check(sig.charm ~= nil, "the charm is part of the signature")
 check(sig.weapon ~= nil and sig.weapon ~= "", "the weapons are part of the signature")
 
--- 2) the saved loadout name is found by armour
+-- 2) the saved loadout name is found by armour, even though one piece carries
+--    upgrade/reinforcement fields the saved loadout does not record
 local name, index = T.game_loadout_name(sig)
 eq(name, "Guardian Arkveld", "the saved loadout name is used as the label")
 eq(index, 1, "and its index is reported")

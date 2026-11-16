@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.3 — loadout label, armour upgrades, visible Refresh
+
+Follow-up from the in-game report: weapons read correctly but the worn loadout
+still showed "not one of the saved loadouts", and the Refresh button was not
+reachable.
+
+- Armour identity no longer includes upgrade/reinforcement fields
+  (`FreeVal2`, `BonusByCreating`, `BonusByGrinding`, `GrindingNum`). Those are
+  real on worn pieces but zero in a saved loadout, so the label comparison
+  failed. They still count for weapons, where they are the Artian roll.
+- The loadout label compares identity keys (category + series/part) on both
+  sides, and the slot-base detection uses the same comparison.
+- Refresh is now a button next to the build line ("Refresh") and again under the
+  new-link row ("Refresh build"); the new-link buttons moved to their own row so
+  nothing is clipped on narrow panels.
+- The build is re-read every two seconds while the panel has not managed to read
+  it yet, instead of once at open.
+
 ## 0.1.2 — correct the equipment-slot offset
 
 Reported in game: a worn saved loadout showed as "not one of the saved
