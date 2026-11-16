@@ -70,8 +70,8 @@ local function sig(over)
         armor = { "0:100:0:0:0:0:0:0", "0:200:1:0:0:0:0:0",
                   "0:300:2:0:0:0:0:0", "0:400:3:0:0:0:0:0",
                   "0:500:4:0:0:0:0:0" },
-        charm = "charm:7",
-        skills = { ["1"] = 5, ["2"] = 3 },
+        charm = "charm:21:0:0:0:0:0:0|0,0,0",
+        jewels = { "2=1,2", "3=4", "4=5,6", "5=7", "6=8" },
         weapon = "13:6:441:0:0:0:0:0",
         weapon_label = "Long Sword",
     }
@@ -105,10 +105,10 @@ do
         "0:100:0:0:0:0:0:0", "0:400:3:0:0:0:0:0", "0:200:1:0:0:0:0:0" } })
     eq(T.sig_key(shuffled, "full"), a, "armour order is not part of the key")
 
-    -- order of the skill pairs must not matter either
+    -- order of the jewels must not matter either
     local s2 = sig()
-    s2.skills = { ["2"] = 3, ["1"] = 5 }
-    eq(T.sig_key(s2, "full"), a, "skill order is not part of the key")
+    s2.jewels = { "6=8", "5=7", "4=5,6", "3=4", "2=1,2" }
+    eq(T.sig_key(s2, "full"), a, "jewel order is not part of the key")
 
     -- a different weapon changes the full key but not the no_weapon key
     local other_weapon = sig({ weapon = "13:6:999:0:0:0:0:0" })
@@ -116,15 +116,15 @@ do
     eq(T.sig_key(other_weapon, "no_weapon"), T.sig_key(sig(), "no_weapon"),
         "weapon is not part of the no_weapon key")
 
-    -- skills matter until the mode drops them
-    local other_skills = sig({ skills = { ["1"] = 5, ["2"] = 2 } })
-    check(T.sig_key(other_skills, "no_weapon") ~= T.sig_key(sig(), "no_weapon"),
-        "skills are part of the no_weapon key")
-    eq(T.sig_key(other_skills, "gear"), T.sig_key(sig(), "gear"),
-        "skills are not part of the gear key")
+    -- jewels (the skill state) matter until the mode drops them
+    local other_jewels = sig({ jewels = { "2=1,9", "3=4", "4=5,6", "5=7", "6=8" } })
+    check(T.sig_key(other_jewels, "no_weapon") ~= T.sig_key(sig(), "no_weapon"),
+        "jewels are part of the no_weapon key")
+    eq(T.sig_key(other_jewels, "gear"), T.sig_key(sig(), "gear"),
+        "jewels are not part of the gear key")
 
     -- charm matters until the mode drops it
-    local other_charm = sig({ charm = "charm:9" })
+    local other_charm = sig({ charm = "charm:21:0:0:1:0:0:0|0,0,0" })
     check(T.sig_key(other_charm, "gear") ~= T.sig_key(sig(), "gear"),
         "charm is part of the gear key")
     eq(T.sig_key(other_charm, "armor"), T.sig_key(sig(), "armor"),
@@ -187,20 +187,20 @@ do
     check(found2 == l, "the same swap still matches with ignore-weapons on")
     eq(mode2, "no_weapon", "matched under the no_weapon mode")
 
-    -- a re-decorated build (skills differ) refuses a strict link
-    local redecorated = sig({ skills = { ["1"] = 5, ["2"] = 1 } })
+    -- a re-decorated build (jewels differ) refuses a strict link
+    local redecorated = sig({ jewels = { "2=1,9", "3=4", "4=5,6", "5=7", "6=8" } })
     check(T.resolve_link(redecorated, { link({ mode = "full" }) }, cfg) == nil,
-        "a strict link refuses a skill change")
+        "a strict link refuses a jewel change")
 
-    -- but gear mode ignores skills, so it still matches
+    -- but gear mode ignores jewels, so it still matches
     local gear_link = link({ mode = "gear" })
     local gfound, gmode = T.resolve_link(redecorated, { gear_link }, cfg)
-    check(gfound == gear_link, "gear mode ignores skill changes")
+    check(gfound == gear_link, "gear mode ignores jewel changes")
     eq(gmode, "gear", "gear mode is reported")
 
     -- armour-only mode ignores a charm swap
     local armor_link = link({ mode = "armor" })
-    local afound = T.resolve_link(sig({ charm = "charm:9", skills = {} }),
+    local afound = T.resolve_link(sig({ charm = "charm:99", jewels = {} }),
         { armor_link }, cfg)
     check(afound == armor_link, "armor mode ignores charm and skills")
 
@@ -316,7 +316,7 @@ do
     eq(n.apply_mode, "topup", "apply mode survives")
     eq(n.mode, "no_weapon", "mode survives")
     eq(n.sig.armor_count, 5, "armour count is recorded")
-    eq(n.sig.skill_count, 2, "skill count is recorded")
+    eq(n.sig.jewel_count, 5, "jewel slot count is recorded")
     eq(n.enabled, true, "links default to enabled")
     check(type(n.id) == "string" and #n.id > 0, "a link id is generated")
 
@@ -357,7 +357,7 @@ do
 
     -- 3. re-decorated set with a strict link: no match, no wrong restock
     local strict = link({ mode = "full" })
-    local redecorated = sig({ skills = { ["1"] = 5, ["2"] = 2, ["9"] = 1 } })
+    local redecorated = sig({ jewels = { "2=1,9", "3=4", "4=5,6", "5=7", "6=8" } })
     check(T.resolve_link(redecorated, { strict }, {}) == nil,
         "a changed jewel does not silently restock the old set")
 end

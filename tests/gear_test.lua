@@ -1,11 +1,19 @@
 --
--- gear_test.lua — the client's bug, end to end, against a fake game.
+-- gear_test.lua — build capture and the client's weapon-swap scenario, end to
+-- end, against a fake game shaped like the 2026-11-15 probe output.
 --
--- Fakes the live catalogue (armour, charm, weapon pack), the hunter's skill
--- list, the save-data loadouts and the item sets, then drives the real code:
+-- The fake mirrors the live build:
+--   * _EquipIndex.Index[1..15] holds equipment box positions (0-based), with
+--     slot 1 = main weapon, 2..6 = armour, 7 = charm, 8 = reserve weapon,
+--     9 = mantle, 10..15 = -1 empty;
+--   * _EquipBox holds the works; cEquipWork uses Category_Gender
+--     (0/1 armour, 13 weapon, 21 charm);
+--   * item my-sets are a fixed 64-slot array with a few real entries;
+--   * app.ItemMySetUtil.applyMySetToPouch(System.Int32) is the apply call.
 --
---   capture the build -> save a link -> restock -> swap the weapon ->
---   restock again with "Ignore weapons" -> change a skill -> no match
+-- Flow: capture -> link -> restock -> swap weapon (strict refuses) ->
+-- ignore-weapons matches -> change jewels (refuses) -> gear mode accepts ->
+-- change the charm roll (refuses).
 --
 --   lua5.1 tests/gear_test.lua
 --
@@ -13,7 +21,7 @@
 _G.LINKED_RESTOCK_TEST = true
 
 -- ---------------------------------------------------------------------------
--- fake SDK (same shapes as pipeline_test.lua)
+-- fake SDK
 -- ---------------------------------------------------------------------------
 
 local function fn(f)
@@ -64,16 +72,6 @@ local function object(type_name, fields)
     return o
 end
 
--- obj:call(name) is how REFramework reaches a method by name
-local function with_methods(o, methods)
-    o.call = function(_, name)
-        local m = methods[name]
-        if m == nil then return nil end
-        return m()
-    end
-    return o
-end
-
 local function array(items)
     local a = { _items = items }
     a.get_Count = fn(function() return #items end)
@@ -85,165 +83,213 @@ local function item_work(id, count)
     return object("app.savedata.cItemWork", { ItemIdFixed = id, Num = count })
 end
 
+local function int_array(values)
+    local items = {}
+    for i, v in ipairs(values) do items[i] = v end
+    return array(items)
+end
+
 -- ---------------------------------------------------------------------------
--- the build in hand
+-- equipment works
 -- ---------------------------------------------------------------------------
 
--- armour: category_gender 0 (armour, male), FreeVal0 = series, FreeVal1 = part
-local function armor_piece(series, part)
+-- armour: Category_Gender 0 (male), FreeVal0 = series, FreeVal1 = part
+local function armor_work(series, part, jewels)
     return object("app.savedata.cEquipWork", {
-        Category_Gender = 0, FreeVal0 = series, FreeVal1 = part, FreeVal2 = 0,
+        Category_Gender = 0,
+        FreeVal0 = series,
+        FreeVal1 = part,
+        FreeVal2 = 0,
+        EquipmentAccessoryIdArray = int_array(jewels or { -1, -1, -1 }),
+        BowgunCustomizeId = int_array({ -1, -1 }),
     })
 end
 
--- weapon: category_gender 13, FreeVal0 = weapon type, FreeVal1 = weapon id,
--- FreeVal2 = artian performance type (the "rolls" part of the identity)
-local function weapon_work(wtype, wid, perf, bonus_create)
+-- weapon: Category_Gender 13, FreeVal0 = type, FreeVal1 = id, FreeVal2 = artian
+-- performance type, BonusByCreating = the roll
+local function weapon_work(wtype, wid, perf, bonus, jewels)
     return object("app.savedata.cEquipWork", {
-        Category_Gender = 13, FreeVal0 = wtype, FreeVal1 = wid,
-        FreeVal2 = perf or 0, BonusByCreating = bonus_create or 0,
+        Category_Gender = 13,
+        FreeVal0 = wtype,
+        FreeVal1 = wid,
+        FreeVal2 = perf or 0,
+        BonusByCreating = bonus or 0,
+        BonusByGrinding = 0,
+        GrindingNum = 0,
+        EquipmentAccessoryIdArray = int_array(jewels or { -1, -1, -1 }),
+        BowgunCustomizeId = int_array({ -1, -1 }),
     })
 end
 
-local armor = {
-    armor_piece(101, 0), armor_piece(102, 1), armor_piece(103, 2),
-    armor_piece(104, 3), armor_piece(105, 4),
-}
-local main_weapon = weapon_work(3, 441, 0, 1234567)
-local charm = object("app.savedata.cCharmEquipped", { MainCharm = 7, SubCharm = 0 })
+-- charm: Category_Gender 21, rolled skills live in BowgunCustomizeId
+-- (skill * 1000 + level, per the save layout)
+local function charm_work(amulet_type, rolls)
+    return object("app.savedata.cEquipWork", {
+        Category_Gender = 21,
+        FreeVal0 = amulet_type,
+        FreeVal1 = 1,
+        FreeVal2 = 0,
+        EquipmentAccessoryIdArray = int_array({ -1, -1, -1 }),
+        BowgunCustomizeId = int_array(rolls or { -1, -1 }),
+    })
+end
 
-local world = { weapon = main_weapon, skills = { 5, 3 } }
+-- positions are 0-based game indices, exactly like _EquipIndex.Index
+local FILLER = 40 -- unrelated works in front of the equipped ones
+local POS = { weapon = 30, armor = 31, charm = 36, weapon2 = 37, mantle = 38 }
+
+local world = {}
 
 local function rebuild_world()
-    local packs = {}
-    for i = 1, 14 do packs[i] = nil end
-    packs[4] = world.weapon -- weapon type 3 (0-based) -> position 4
-
-    local catalog = object("app.cPlayerCatalogHolder", {
-        cArmorList = array(armor),
-        cWpCharm = charm,
-        cWeaponTypePack = array({ world.weapon }),
-    })
-
-    local skill_entries = {}
-    for i, lv in ipairs(world.skills) do
-        skill_entries[i] = object("app.cHunterSkill.cInfo", { _Skill = i * 10, _SkillLv = lv })
+    local box = {}
+    for i = 1, FILLER do
+        box[i] = armor_work(900, 0, { -1, -1, -1 }) -- never equipped
     end
-    local holder = object("app.EquipDataHolder", {
-        _EquipSkillDataArray = array(skill_entries),
-    })
-    local skill = object("app.cHunterSkillParamInfo", { _EquipDataHolderRef = holder })
-    local weapon = object("app.cWeapon", { _WpType = 3 })
-    local status = with_methods(object("app.cHunterStatus", { _Skill = skill }), {
-        get_IsUserControl = function() return true end,
-        get_IsNpc = function() return false end,
-    })
+    local function put(pos, work) box[pos + 1] = work end
+    world.weapon = weapon_work(3, 441, 0, 1234567, { 235, 2, 0 })
+    put(POS.weapon, world.weapon)
+    put(POS.armor, armor_work(39, 0, { 158, -1, -1 }))
+    put(POS.armor + 1, armor_work(39, 1, { 158, -1, -1 }))
+    put(POS.armor + 2, armor_work(168, 2, { 157, 132, 160 }))
+    put(POS.armor + 3, armor_work(196, 3, { 157, -1, -1 }))
+    put(POS.armor + 4, armor_work(198, 4, { 123, 167, -1 }))
+    world.charm = charm_work(192, { 5, 258 })
+    put(POS.charm, world.charm)
+    world.weapon2 = weapon_work(6, 85, 0, 0, { 236, 82, 45 })
+    put(POS.weapon2, world.weapon2)
+    local mantle = armor_work(2, 0, { -1, -1, -1 })
+    mantle._f.Category_Gender = 17 -- mantle: other category
+    put(POS.mantle, mantle)
 
-    local character = with_methods(object("app.HunterCharacter", {}), {
-        get_HunterStatus = function() return status end,
-        get_Weapon = function() return weapon end,
-        get_WeaponID = function() return 441 end,
-    })
+    -- slot order: 1 weapon, 2..6 armour, 7 charm, 8 weapon, 9 mantle
+    local index = {
+        POS.weapon, POS.armor, POS.armor + 1, POS.armor + 2, POS.armor + 3,
+        POS.armor + 4, POS.charm, POS.weapon2, POS.mantle,
+        -1, -1, -1, -1, -1, -1,
+    }
 
-    local player_info = with_methods(object("app.cPlayerManageInfo", {}), {
-        get_Character = function() return character end,
-    })
-    local instance = with_methods(object("app.cPlayerManageControl", {}), {
-        get_PlayerInfo = function() return player_info end,
-        get_Character = function() return character end,
-    })
-
-    local player_manager = with_methods(object("app.PlayerManager", {
-        _InstancedPlayerList = object("x", { _Array = array({ instance }) }),
-    }), {
-        get_Catalog = function() return catalog end,
-    })
-    -- the mod calls get_Catalog() directly (SDK method binding), so provide
-    -- both shapes the fake objects are asked for
-    player_manager.get_Catalog = function() return catalog end
-
-    -- save data: one armour loadout with the same pieces, for the label
-    local loadout_pieces = {}
-    for i, p in ipairs(armor) do loadout_pieces[i] = p end
-    loadout_pieces[#loadout_pieces + 1] = world.weapon
+    -- one saved equipment loadout with the same armour, for the label
+    local myset_pieces = {}
+    for i = 0, 4 do
+        myset_pieces[#myset_pieces + 1] = object("app.savedata.cMysetEquipWork", {
+            Category = 0, FreeVal0 = ({ 39, 39, 168, 196, 198 })[i + 1],
+            FreeVal1 = i, IsNone = 0,
+        })
+    end
     local myset = object("app.savedata.cEquipMyset", {
         _MysetParam = object("app.savedata.cMysetBaseParam", {
             MysetName = "Guardian Arkveld", IsEmpty = 0,
         }),
-        _MysetEquipWork = array(loadout_pieces),
-    })
-    local equip = object("app.savedata.cEquipParam", {
-        _EquipMySet = array({ myset }),
-        _EquipBox = array({ world.weapon }),
-        _CharmEquipped = charm,
-        _EquipIndex = object("app.savedata.cEquipIndex", { Index = array({ 0 }) }),
+        _MysetEquipWork = array(myset_pieces),
     })
 
-    -- items: one item set and an empty pouch so a restock has work to do
-    local item_set = object("app.savedata.cItemMySet", {
-        Name = "Rompo LBG",
-        _PouchItem = array({ item_work(1, 5), item_work(2, 3) }),
+    local equip = object("app.savedata.cEquipParam", {
+        _EquipBox = array(box),
+        _EquipIndex = object("app.savedata.cEquipIndex", { Index = int_array(index) }),
+        _EquipMySet = array({ myset }),
+        _CharmEquipped = object("app.savedata.cCharmEquipped", { MainCharm = 90 }),
     })
-    local item = object("app.savedata.cItemParam", {
+
+    -- item sets: the game keeps 64 slots, only three are real
+    local function item_set(name, contents)
+        return object("app.savedata.cItemMySet", {
+            Name = name,
+            _PouchItem = array(contents),
+        })
+    end
+    local sets = {
+        item_set("Base", { item_work(1, 10), item_work(2, 3) }),
+        item_set("Shrooms", { item_work(1, 10), item_work(3, 5) }),
+        item_set("LBG", { item_work(1, 10), item_work(2, 3), item_work(3, 2) }),
+    }
+    local all_sets = {}
+    for i = 1, 64 do all_sets[i] = sets[i] or item_set("", {}) end
+
+    world.item = object("app.savedata.cItemParam", {
         _PouchItem = array({ item_work(0, 0), item_work(0, 0), item_work(0, 0),
                              item_work(0, 0), item_work(0, 0), item_work(0, 0) }),
-        _BoxItem = array({ item_work(1, 9), item_work(2, 9) }),
+        _BoxItem = array({ item_work(1, 90), item_work(2, 90), item_work(3, 90) }),
     })
+
     local save = object("app.savedata.cUserSaveData", {
         _Equip = equip,
-        _Item = item,
-        _ItemMySet = object("app.savedata.cItemMySetData", { _Data = array({ item_set }) }),
+        _Item = world.item,
+        _ItemMySet = object("app.savedata.cItemMySetData", { _Data = array(all_sets) }),
     })
     local sdm = object("app.SaveDataManager", {})
     sdm.getCurrentUserSaveData = function() return save end
-
-    world.item = item
-    world.skill_entries = skill_entries
-    return player_manager, sdm
+    world.sdm = sdm
+    return sdm
 end
 
-local player_manager, sdm = rebuild_world()
-
+-- the confirmed apply call: fill the pouch from the 0-based set index
 local apply_calls = 0
 local apply_method = {
-    get_name = function() return "applyItemMySet(System.Int32)" end,
+    get_name = function() return "applyMySetToPouch(System.Int32)" end,
     get_num_params = function() return 1 end,
     get_param_types = function()
         return { { get_full_name = function() return "System.Int32" end } }
     end,
     is_static = function() return true end,
-    call = function()
+    call = function(_, index)
         apply_calls = apply_calls + 1
-        return nil -- the pouch read-back decides, and the top-up path fills it
+        local sets = world.item and world.item._f and nil
+        local _, save = nil, world.sdm
+        local data = save.getCurrentUserSaveData()
+        local all = data._f._ItemMySet._f._Data._items
+        local set = all[index + 1]
+        if set == nil then return nil end
+        -- rewrite the pouch to the set contents
+        local works = {}
+        for _, w in ipairs(set._f._PouchItem._items) do
+            works[#works + 1] = item_work(w._f.ItemIdFixed, w._f.Num)
+        end
+        for i = #works + 1, 6 do works[i] = item_work(0, 0) end
+        world.item._f._PouchItem = array(works)
+        return nil
     end,
 }
+
+local apply_set_method = {
+    get_name = function() return "apply(app.savedata.cItemMySet)" end,
+    get_num_params = function() return 1 end,
+    get_param_types = function()
+        return { { get_full_name = function() return "app.savedata.cItemMySet" end } }
+    end,
+    is_static = function() return true end,
+    call = function() return nil end,
+}
+
 local util_td = {
     get_full_name = function() return "app.ItemMySetUtil" end,
     get_parent_type = function() return nil end,
     get_fields = function() return {} end,
-    get_methods = function() return { apply_method } end,
+    get_methods = function() return { apply_method, apply_set_method } end,
     get_method = function(_, sig)
-        if sig == "applyItemMySet(System.Int32)" then return apply_method end
+        if sig == "applyMySetToPouch(System.Int32)" then return apply_method end
+        if sig == "apply(app.savedata.cItemMySet)" then return apply_set_method end
         return nil
     end,
 }
 
 re = { on_frame = function() end, on_draw_ui = function() end }
+json = { dump_file = function() end, load_file = function() return nil end }
+log = { info = function() end, warn = function() end, debug = function() end }
+imgui = {}
+draw = nil
+
+local sdm = rebuild_world()
+
 sdk = {
     find_type_definition = function(name)
         if name == "app.ItemMySetUtil" then return util_td end
         return nil
     end,
     get_managed_singleton = function(name)
-        if name == "app.PlayerManager" then return player_manager end
         if name == "app.SaveDataManager" then return sdm end
         return nil
     end,
 }
-json = { dump_file = function() end, load_file = function() return nil end }
-log = { info = function() end, warn = function() end, debug = function() end }
-imgui = {}
-draw = nil
 
 local here = arg and arg[0] or "tests/gear_test.lua"
 local dir = string.match(here, "^(.*)[/\\]") or "."
@@ -281,83 +327,88 @@ local function run_task(limit)
     return false
 end
 
--- ---------------------------------------------------------------------------
--- the flow
--- ---------------------------------------------------------------------------
-
--- 1) capture the build
-T.set_config(cfg())
-local sig, source = T.current_signature()
-check(sig ~= nil, "the build is readable")
-eq(source, "catalog", "the live catalogue is the gear source")
-eq(sig.armor_count, 5, "five armour pieces")
-eq(sig.skill_count, 2, "two skills")
-eq(sig.charm, "charm:7", "the charm is part of the signature")
-check(sig.weapon ~= nil and sig.weapon ~= "", "the weapon is part of the signature")
-
--- 2) the game loadout name is found by armour
-local name, index = T.game_loadout_name(sig)
-eq(name, "Guardian Arkveld", "the saved loadout name is used as the label")
-eq(index, 1, "and its index is reported")
-
--- 3) link it and restock
-T.get_config().links = {
-    T.normalize_link({
-        id = "l1", label = name, item_set = 1, item_set_name = "Rompo LBG",
-        apply_mode = "exact", sig = sig,
-    }),
-}
-local started = T.fire("test")
-check(started == true, "the link resolves for this build")
-check(run_task(), "the restock completes")
-eq(T.pouch_snapshot()[1], 5, "the linked item set landed")
-eq(apply_calls, 1, "the game apply was tried once")
-
--- 4) the client's bug: swap the weapon in place, a full match must refuse
-T.state.task = nil
-world.weapon._f.FreeVal1 = 900
-world.weapon._f.FreeVal2 = 1
-world.weapon._f.BonusByCreating = 7654321
-local swapped = T.fire("test")
-check(swapped == false, "a weapon swap refuses a strict link")
-check(T.state.task == nil, "nothing is applied on a refused match")
-check(T.state.last_result:find("no link") ~= nil, "and the panel says why")
-
--- 5) with Ignore weapons the very same build still matches, and restocks
 local function reset_items()
     for _, w in ipairs(world.item._f._PouchItem._items) do
         w._f.ItemIdFixed = 0
         w._f.Num = 0
     end
     for _, w in ipairs(world.item._f._BoxItem._items) do
-        w._f.Num = 9
+        w._f.Num = 90
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- the flow
+-- ---------------------------------------------------------------------------
+
+-- 1) capture the build from _EquipIndex -> _EquipBox
+T.set_config(cfg())
+local sig, source = T.current_signature()
+check(sig ~= nil, "the build is readable")
+eq(source, "equip_index (11/11)", "the slot layout scores 11/11 (weapon 3 + 5 armour + charm 3)")
+eq(sig.armor_count, 5, "five armour pieces")
+eq(sig.jewel_count, 5, "five armour jewel slots")
+check(sig.charm ~= nil, "the charm is part of the signature")
+check(sig.weapon ~= nil and sig.weapon ~= "", "the weapons are part of the signature")
+
+-- 2) the saved loadout name is found by armour
+local name, index = T.game_loadout_name(sig)
+eq(name, "Guardian Arkveld", "the saved loadout name is used as the label")
+eq(index, 1, "and its index is reported")
+
+-- 3) link it and restock through the confirmed apply call
+T.get_config().links = {
+    T.normalize_link({
+        id = "l1", label = name, item_set = 1, item_set_name = "Base",
+        apply_mode = "exact", sig = sig,
+    }),
+}
+reset_items()
+eq(T.fire("test"), true, "the link resolves for this build")
+check(run_task(), "the restock completes")
+eq(T.pouch_snapshot()[1], 10, "the linked item set landed")
+eq(T.pouch_snapshot()[2], 3, "and so did its second item")
+check(apply_calls >= 1, "applyMySetToPouch was called, not just the top-up")
+
+-- 4) the client's bug: swap the weapon, a strict match must refuse
+world.weapon._f.FreeVal1 = 900
+world.weapon._f.FreeVal2 = 1
+world.weapon._f.BonusByCreating = 7654321
+T.state.task = nil
+eq(T.fire("test"), false, "a weapon swap refuses a strict link")
+check(T.state.task == nil, "nothing is applied on a refused match")
+check(T.state.last_result:find("no link") ~= nil, "and the panel says why")
+
+-- 5) with Ignore weapons the same build still matches, and restocks
 T.get_config().ignore_weapons = true
 reset_items()
-eq(T.pouch_snapshot()[1], nil, "the pouch starts empty")
-local ok2 = T.fire("test")
-check(ok2 == true, "ignore-weapons restores the same link after the swap")
+check(T.fire("test") == true, "ignore-weapons restores the link after the swap")
 check(T.state.last_match ~= nil, "a link matched")
 check(run_task(), "and the restock completes")
-eq(T.pouch_snapshot()[1], 5, "the linked item set landed again")
+eq(T.pouch_snapshot()[1], 10, "the linked item set landed again")
 
--- 6) a skill change is still a different build, even with ignore-weapons on
-local calls_before = apply_calls
-world.skill_entries[2]._f._SkillLv = 1
+-- 6) re-jewelled armour is a different build under ignore-weapons
+local armor_work_obj = world.item and nil
+local box = world.sdm.getCurrentUserSaveData()._f._Equip._f._EquipBox._items
+box[POS.armor + 1]._f.EquipmentAccessoryIdArray = int_array({ 158, 9, -1 })
+T.state.task = nil
 reset_items()
-local ok3 = T.fire("test")
-check(ok3 == false, "a re-decorated build does not silently restock")
-eq(apply_calls, calls_before, "no apply was attempted")
+check(T.fire("test") == false, "a re-jewelled build does not silently restock")
 eq(T.pouch_snapshot()[1], nil, "the pouch was left alone")
 
--- 7) and a looser link mode accepts it, as documented
+-- 7) gear mode accepts the jewel change, as documented
 T.get_config().links[1].mode = "gear"
-local ok4 = T.fire("test")
-check(ok4 == true, "gear mode accepts a skill change")
+check(T.fire("test") == true, "gear mode accepts a jewel change")
 check(run_task(), "and applies")
-eq(T.pouch_snapshot()[1], 5, "the pouch is restocked")
+eq(T.pouch_snapshot()[1], 10, "the pouch is restocked")
+
+-- 8) a different charm roll is a different build (charms carry skills)
+T.get_config().links[1].mode = "inherit"
+world.charm._f.BowgunCustomizeId = int_array({ 5, 260 })
+T.state.task = nil
+reset_items()
+check(T.fire("test") == false, "a charm re-roll does not match the old link")
+eq(T.pouch_snapshot()[1], nil, "and nothing was applied")
 
 -- ---------------------------------------------------------------------------
 

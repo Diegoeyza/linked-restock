@@ -242,24 +242,31 @@ local function item_sets()
     return collect(ims and field_value(ims, "_Data"), 64)
 end
 
--- Item id -> localized name, using app.user_data.ItemData (proven in
--- meal-buffet: get_ItemId is the enum, _ItemId is the fixed id).
+-- Item id (fixed id) -> localized name, through the master data table the
+-- meal mods use: VariousDataManager._Setting._ItemSetting._ItemData and its
+-- getDataByFixedId(System.Int32) method, then _RawName -> via.gui.message.
+-- (The static app.user_data.ItemData form returns nil on this build.)
 local function item_name(fixed_id)
     if fixed_id == nil or fixed_id == 0 then return nil end
-    local typed = safe(function()
-        return sdk.find_type_definition("app.user_data.ItemData")
-    end)
-    local get_data = typed and safe(function()
-        return typed:get_method("getDataByFixedId(System.Int32)")
-    end)
-    local data = get_data and safe(function() return get_data:call(nil, fixed_id) end)
-    if data == nil then return nil end
-    local raw = field_value(data, "RawName") or field_value(data, "_RawName")
-    if type(raw) == "userdata" then
+    local vm = safe(function() return sdk.get_managed_singleton("app.VariousDataManager") end)
+    local setting = vm and field_value(vm, "_Setting")
+    local item_setting = setting and field_value(setting, "_ItemSetting")
+    local tbl = item_setting and field_value(item_setting, "_ItemData")
+    local entry = nil
+    if tbl ~= nil then
+        local td = safe(function() return tbl:get_type_definition() end)
+        local m = td and safe(function()
+            return td:get_method("getDataByFixedId(System.Int32)")
+        end)
+        entry = m and safe(function() return m:call(tbl, fixed_id) end)
+    end
+    if entry == nil then return nil end
+    local raw = field_value(entry, "_RawName") or field_value(entry, "RawName")
+    if raw ~= nil then
         local msg = safe(function() return via.gui.message.get(raw) end)
         if msg then return msg end
     end
-    return field_value(data, "Name")
+    return safe_str(field_value(entry, "Name"))
 end
 
 -- ---------------------------------------------------------------------------
@@ -447,6 +454,12 @@ local function dump_gear()
     out.weapon_samples = {}
     local box = collect(ep and field_value(ep, "_EquipBox"), 400)
     out.equip_box_count = #box
+    local box_obj = ep and field_value(ep, "_EquipBox")
+    out.equip_box_count_total = safe(function()
+        local cnt = box_obj and box_obj.get_Count
+        if cnt == nil then return nil end
+        return cnt:call(box_obj)
+    end)
     local shown = 0
     local weapon_util = safe(sdk.find_type_definition, "app.WeaponUtil")
     local get_weapon_data = weapon_util and safe(function()

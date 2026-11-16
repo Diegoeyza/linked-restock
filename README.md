@@ -5,12 +5,10 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.0 — first build, not yet verified in game.** The item/equipment
-> save layout it reads is confirmed from the game's own type data; the game call
-> that applies an item set is discovered at runtime by name, and every attempt is
-> verified by reading the pouch back. Run `tools/loadout_probe.lua` once in the
-> hub and send back the four JSON files to confirm the apply path on your build.
-> The pouch top-up path works with or without that call.
+> **Status: v0.1.1 — probe-verified on the live build.** The probe confirmed the
+> worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
+> and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
+> tests still have to be run once; see `docs/VERIFY.md`.
 
 ## The problem it solves
 
@@ -79,18 +77,19 @@ skills, the weapon, and the game loadout the build belongs to. If it says
 
 ## How it works
 
-- **Gear** comes from the live catalogue (`app.PlayerManager:get_Catalog()`),
-  so it is what you are actually wearing, not what a loadout slot remembers.
-  Falls back to the saved my-set index if the catalogue is unreadable.
-- **Skills** are the resolved levels on your hunter
-  (`cHunterSkill._EquipDataHolderRef._EquipSkillDataArray`), which covers armour
-  skills, decorations, set bonuses and the charm in one map.
+- **Gear** comes from the save data: `_EquipIndex.Index` holds the equipment box
+  position of the item worn in each slot, and `_EquipBox` holds those works. That
+  is what you are actually wearing, so a mid-quest weapon swap is seen correctly.
+- **Skills** are captured as jewels: each piece's `EquipmentAccessoryIdArray`
+  plus `BowgunCustomizeId` (where a charm's rolled skills live). The skill-level
+  array the game exposes on this build carries no readable levels, so the jewel
+  state is the identity of "the same skills".
 - **Item loadouts** are read from the save data
   (`_ItemMySet._Data[]._PouchItem[]`, `ItemIdFixed` + `Num`), with names from the
   game's own item table.
-- **Applying** tries the game's own item-set call (methods on
-  `app.ItemMySetUtil` / `app.ItemPouchUtil`, ranked by name), verifies the pouch
-  afterwards, and falls back to topping the pouch up from the item box.
+- **Applying** calls `app.ItemMySetUtil.applyMySetToPouch(index)` (or
+  `apply(set)`), verifies the pouch afterwards, and falls back to topping the
+  pouch up from the item box.
 - **Triggers** poll `app.MissionManager:get_IsPlayingQuest()` twice a second. No
   hooks.
 
