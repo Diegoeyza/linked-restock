@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.19"
+local VERSION = "0.1.20"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1749,6 +1749,12 @@ local API_VALUES = {
     { "app.MissionManager", "get_IsActiveQuest" },
     { "app.MissionManager", "get_ActiveQuestData" },
     { "app.MissionManager", "get_QuestDirector" },
+    { "app.MissionManager", "get_IsQuestResult" },
+    { "app.MissionManager", "get_IsQuestEndShowing" },
+    { "app.MissionManager", "get_IsGoQuest" },
+    { "app.MissionManager", "get_IsGoToLoadingQuest" },
+    { "app.MissionManager", "get_IsStartGoQuestLoading" },
+    { "app.GameFlowManager", "get_Loading" },
     { "app.PlayerManager", "get_Player" },
     { "app.PlayerManager", "get_IsExistPlayer" },
     { "app.GameFlowManager", "get_Phase" },
@@ -1828,9 +1834,15 @@ local function flow_trace(q)
     local active = mm and call_method(mm, "get_IsActiveQuest")
     local aqd = mm and call_method(mm, "get_ActiveQuestData")
     local director = mm and call_method(mm, "get_QuestDirector")
-    local tuple = string.format("playing=%s active=%s questdata=%s director=%s",
+    local result = mm and call_method(mm, "get_IsQuestResult")
+    local ending = mm and call_method(mm, "get_IsQuestEndShowing")
+    local gfm = safe(function() return sdk.get_managed_singleton("app.GameFlowManager") end)
+    local loading = gfm and call_method(gfm, "get_Loading")
+    local tuple = string.format(
+        "playing=%s active=%s questdata=%s director=%s result=%s ending=%s loading=%s",
         tostring(q), tostring(active), aqd ~= nil and "yes" or "no",
-        director ~= nil and "yes" or "no")
+        director ~= nil and "yes" or "no", tostring(result), tostring(ending),
+        tostring(loading))
     if tuple ~= last_flow_trace then
         last_flow_trace = tuple
         log.info("[LinkedRestock] flow " .. tuple)
@@ -1934,18 +1946,44 @@ end
 -- the quest flow AND the hub is loaded. IsActiveQuest is already false on the
 -- results screen, so the gate also requires no quest data, no quest director and
 -- readable item data, and it has to hold for a while before anything runs.
-local EXACT_HUB_POLLS = 20 -- ~10 s at the 30-frame poll cadence
+local EXACT_HUB_POLLS = 8 -- ~4 s at the 30-frame poll cadence
 
-local function hub_is_settled()
+-- The exact item-set call may only run on a loaded hub with nothing in flight.
+-- The API dump (linked_restock_api.json) found the precise signals:
+--   app.MissionManager.get_IsQuestResult / get_IsQuestEndShowing
+--   app.GameFlowManager.get_Loading
+-- so the gate is explicit rather than a guessed delay. Returns ok, reason.
+-- a flag from the game may arrive as a boolean or a boxed/numeric value
+local function flag(v)
+    if v == true then return true end
+    if type(v) == "number" then return v ~= 0 end
+    return false
+end
+
+local function hub_gate()
     local mm = safe(function()
         return sdk.get_managed_singleton("app.MissionManager")
     end)
-    if mm == nil then return false end
-    if call_method(mm, "get_IsPlayingQuest") == true then return false end
-    if call_method(mm, "get_IsActiveQuest") == true then return false end
-    if call_method(mm, "get_ActiveQuestData") ~= nil then return false end
-    if call_method(mm, "get_QuestDirector") ~= nil then return false end
-    return world_ready()
+    if mm == nil then return false, "no quest manager" end
+    if flag(call_method(mm, "get_IsPlayingQuest")) then return false, "in a quest" end
+    if flag(call_method(mm, "get_IsActiveQuest")) then return false, "quest active" end
+    if flag(call_method(mm, "get_IsQuestResult")) then return false, "results screen" end
+    if flag(call_method(mm, "get_IsQuestEndShowing")) then
+        return false, "quest end screen"
+    end
+    local gfm = safe(function()
+        return sdk.get_managed_singleton("app.GameFlowManager")
+    end)
+    if gfm ~= nil and flag(call_method(gfm, "get_Loading")) then
+        return false, "loading"
+    end
+    if not world_ready() then return false, "item data not readable" end
+    return true
+end
+
+local function hub_is_settled()
+    local ok = hub_gate()
+    return ok
 end
 
 local ACCEPT_POLLS = 2   -- ~1 s: the game initialises the quest pouch first
@@ -2019,8 +2057,9 @@ local function poll()
     end
     state.hub_polls = in_hub and ((state.hub_polls or 0) + 1) or 0
 
-    local settled = false
-    if q == false then settled = hub_is_settled() end
+    local settled, why = false, nil
+    if q == false then settled, why = hub_gate() end
+    state.settled_reason = why
     state.settled_polls = settled and ((state.settled_polls or 0) + 1) or 0
 
     -- once the hub has been loaded and quiet for a while, run the exact pass
@@ -2302,6 +2341,14 @@ local function quest_state_text()
     local still_active = mm and call_method(mm, "get_IsActiveQuest")
     if still_active == true then
         return "results screen - waiting for the hub"
+    end
+    if state.exact_due ~= nil then
+        if (state.settled_polls or 0) > 0 then
+            return string.format("in the hub - exact apply in %d/%d poll(s)",
+                state.settled_polls, EXACT_HUB_POLLS)
+        end
+        return "in the hub - exact apply waiting (" ..
+            tostring(state.settled_reason or "not settled") .. ")"
     end
     if state.quest_seq > 0 and state.quest_seq > (state.hub_done_seq or -1) then
         return string.format("in the hub - hub restock in %d/%d poll(s)",

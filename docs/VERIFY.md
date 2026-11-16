@@ -105,5 +105,5 @@ the thing to adjust — it is one function, near the top of the gear section.
 ## Regression checks after any edit
 
 - `luac -p reframework/linked_restock.lua` (Lua 5.1) — no modern syntax.
-- `LUA=… ./tests/run.sh` — 212 assertions stay green.
+- `LUA=… ./tests/run.sh` — 216 assertions stay green.
 - Panel opens without a Lua error in `reframework/REFramework_log.txt`.

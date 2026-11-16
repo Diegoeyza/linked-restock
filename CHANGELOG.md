@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.20 — the hub gate is exact, because the API dump named the signals
+
+The flow dump the 0.1.18 build wrote to `linked_restock_api.json` (read from the
+game folder) listed the getters that were being guessed at:
+
+```
+app.MissionManager.get_IsQuestResult
+app.MissionManager.get_IsQuestEndShowing
+app.GameFlowManager.get_Loading        (GameFlowManager is a managed singleton)
+```
+
+So the exact pass no longer waits ten seconds hoping the return flow is over. It
+waits for the real conditions, and only for as long as they take:
+
+- not in a quest, no active quest
+- **no quest result screen** (`get_IsQuestResult`)
+- **no quest end screen** (`get_IsQuestEndShowing`)
+- **not loading** (`app.GameFlowManager.get_Loading`)
+- item data readable
+
+held for 8 polls (~4 s) so a flicker cannot open the gate. Flags are read
+tolerantly (boolean or boxed/numeric), and the gate counter resets the moment any
+condition fails.
+
+The panel now says which condition is blocking:
+`in the hub - exact apply waiting (results screen)` and then
+`in the hub - exact apply in 3/8 poll(s)`.
+
+The flow trace logs `playing / active / questdata / director / result / ending /
+loading` on every change, so the next quest leaves a readable record.
+
 ## 0.1.19 — the exact apply has no switch
 
 Requested in game: "remove the exact apply button, it should always be on,

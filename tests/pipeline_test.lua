@@ -172,10 +172,14 @@ local pouch_helper = {
 }
 
 -- fake MissionManager for the trigger state machine
-local mm = { playing = false, active = false }
+local mm = { playing = false, active = false, result = false, ending = false,
+             gfm_loading = false }
 function mm:call(name)
     if name == "get_IsPlayingQuest" then return self.playing end
     if name == "get_IsActiveQuest" then return self.active end
+    if name == "get_IsQuestResult" then return self.result end
+    if name == "get_IsQuestEndShowing" then return self.ending end
+    if name == "get_Loading" then return self.gfm_loading end
     return nil
 end
 
@@ -201,6 +205,7 @@ sdk = {
     get_managed_singleton = function(name)
         if name == "app.SaveDataManager" then return sdm end
         if name == "app.MissionManager" then return mm end
+        if name == "app.GameFlowManager" then return mm end
         return nil
     end,
 }
@@ -349,13 +354,33 @@ T.state.pending_retry = nil
 T.state.task = nil
 T.state.settled_polls = 0
 T.state.exact_due = { link = link }
-for _ = 1, 19 do T.poll() end
-eq(T.state.task, nil, "the exact pass has not run after 19 settled polls")
+for _ = 1, 7 do T.poll() end
+eq(T.state.task, nil, "the exact pass has not run after 7 settled polls")
 T.poll()
-check(T.state.task ~= nil, "it starts once the gate has held for 20 polls")
+check(T.state.task ~= nil, "it starts once the gate has held for 8 polls")
 check(run_task(), "and completes")
 check(world.apply_calls >= 1, "the game's own apply ran at last")
 eq(T.state.exact_due, nil, "the pending exact pass is consumed")
+
+-- 5e) the results screen and a loading screen keep the gate closed
+rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
+world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
+T.state.task = nil
+T.state.settled_polls = 0
+T.state.exact_due = { link = link }
+mm.result = true
+for _ = 1, 15 do T.poll() end
+eq(T.state.task, nil, "the results screen blocks the exact pass")
+eq(T.state.settled_polls, 0, "and the gate counter stays at zero")
+mm.result = false
+mm.gfm_loading = true
+for _ = 1, 15 do T.poll() end
+eq(T.state.task, nil, "a loading screen blocks the exact pass")
+mm.gfm_loading = false
+for _ = 1, 8 do T.poll() end
+check(T.state.task ~= nil, "the gate opens once nothing is in flight")
+T.state.task = nil
+T.state.exact_due = nil
 
 -- 6) candidate ranking puts the item-set apply first
 local cands = T.apply_candidates()
