@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.16"
+local VERSION = "0.1.17"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -2289,10 +2289,12 @@ local function draw_ui()
     imgui.text("  links match on: " .. match_text({ sig = {} }))
     local c4, v4 = imgui.checkbox("Notify missing items", config.notify_missing)
     if c4 then config.notify_missing = v4 changed = true end
-    local c5, v5 = imgui.checkbox("Game call on automatic restock",
+    local c5, v5 = imgui.checkbox("Game call on automatic restock (risky at quest end)",
         config.game_call_on_auto)
     if c5 then config.game_call_on_auto = v5 changed = true end
-    imgui.text("  automatic restocks write save data only unless this is on")
+    imgui.text("  automatic: " .. (config.game_call_on_auto
+        and "game item-set call, then top-up"
+        or "top-up from the item box only"))
 
     imgui.separator()
     imgui.text("Restock when:")

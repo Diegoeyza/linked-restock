@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.16 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.17 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -100,6 +100,21 @@ The panel is live: it re-reads the worn gear twice a second and prints
 (`matches the worn build`, or `no match - differs: armour pieces, charm`), so a
 loadout switch is visible without pressing anything or waiting for a trigger. If it says
 "not read yet" nothing has been equipped/loaded yet; press *Refresh*.
+
+## The two ways to apply an item set
+
+- **The game's own call** (`app.ItemMySetUtil.applyMySetToPouch`). It applies the
+  item set exactly as the game would: the same items, counts and slot order, and
+  it removes what the set does not contain. It is what **Apply now** and a link's
+  **Apply** use. It must not be called while the game is tearing a quest down —
+  that crashed the client — so it is never used by the automatic triggers unless
+  you tick **Game call on automatic restock**.
+- **A save-data top-up.** The mod raises pouch counts and fills empty slots from
+  the item box, and never calls into the game. It reaches the same item counts,
+  but leaves items in the pouch that the set does not list, and cannot reorder
+  slots. This is what the quest-accept and hub-return triggers use.
+
+Nothing is ever created: the item box is the hard limit in both paths.
 
 ## How it works
 

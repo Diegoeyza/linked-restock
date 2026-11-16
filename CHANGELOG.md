@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.17 — say what the automatic restock actually does
+
+Wording only: the switch from 0.1.16 is now labelled by its risk and the line
+under it states the current automatic path, `top-up from the item box only` or
+`game item-set call, then top-up`, so the difference between the manual and
+automatic apply is visible in the panel instead of implied.
+
 ## 0.1.16 — automatic restocks no longer call into the game
 
 Reported in game: the client crashed at the end of a quest, while the mod was
