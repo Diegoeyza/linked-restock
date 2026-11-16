@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.5 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.6 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -65,8 +65,8 @@ Linked Restock matches on what actually defines the build:
 
 1. In the hub, equip the build you want to link.
 2. Open *Linked Restock*, pick its item loadout in **New link → Item set**.
-3. Choose the **Match** mode (leave it on *inherit* to follow the global
-   Ignore-weapons checkbox), then press **Link current build**.
+3. Choose the **Match** mode with `<` / `>` (leave it on *inherit* to follow the
+   global Ignore-weapons checkbox), then press **Link current build**.
 4. Tick **Quest accepted** and/or **Back in the hub**.
 5. Press **Preview** on the link to see exactly what will change, then
    **Apply** to try it immediately.

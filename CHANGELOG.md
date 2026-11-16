@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.6 — controls that cannot be clipped
+
+Reported in game: "it is not letting me make a new link, it does not let me
+change the base item set". The panel's rows were wider than the REFramework
+window, so the combo boxes and buttons were pushed off the right edge (the same
+reason Refresh had gone missing earlier).
+
+- Every picker is now a pair of `<` / `>` buttons with the current value shown
+  in brackets, stacked vertically: item set and match mode for the new link,
+  and per link row. Nothing depends on a combo popup or on horizontal space.
+- Per link: item set, match mode, Preview, Apply, Remove on their own lines.
+- The default item set picker cycles `(none)` and the real sets the same way.
+- When no item loadouts are found the panel says so instead of showing an empty
+  picker, and pressing "Link current build" with no set selected reports it.
+- Removed the unused label builder.
+
 ## 0.1.5 — stop counting specialized equipment as a weapon
 
 The panel reported "same armour as Omega - weapons differ" while the worn set

@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.5"
+local VERSION = "0.1.6"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1589,18 +1589,12 @@ local function item_set_choices()
     return out
 end
 
-local function item_set_labels(choices)
-    local labels = {}
-    for _, c in ipairs(choices) do labels[#labels + 1] = c.name end
-    if #labels == 0 then labels[1] = "(no item sets found)" end
-    return labels
-end
-
-local function combo_pos(choices, index)
+local function choice_pos(choices, index)
+    if index == nil then return nil end
     for pos, c in ipairs(choices) do
         if c.index == index then return pos - 1 end
     end
-    return 0
+    return nil
 end
 
 local function choice_index(choices, pos)
@@ -1608,9 +1602,12 @@ local function choice_index(choices, pos)
     return c and c.index or nil
 end
 
-local function mode_labels()
-    return { MODE_LABELS.inherit, MODE_LABELS.full, MODE_LABELS.no_weapon,
-             MODE_LABELS.gear, MODE_LABELS.armor }
+local function cycle(pos, delta, count)
+    if count <= 0 then return 0 end
+    pos = (pos or 0) + delta
+    if pos < 0 then return count - 1 end
+    if pos > count - 1 then return 0 end
+    return pos
 end
 
 local function mode_from_index(i)
@@ -1623,6 +1620,32 @@ local function mode_to_index(mode)
         if m == mode then return i end
     end
     return 0
+end
+
+local function mode_label_at(pos)
+    if pos == nil or pos <= 0 then return MODE_LABELS.inherit end
+    return MODE_LABELS[MODES[pos]] or MODE_LABELS.inherit
+end
+
+-- < [name] >  -- buttons, not a combo: the panel is narrow and combo popups
+-- were getting clipped, which made the picker unreachable.
+local function item_set_picker(id, choices, current)
+    local pos = choice_pos(choices, current)
+    local result = nil
+    if imgui.button("<##prev" .. id) then
+        result = choice_index(choices, cycle(pos, -1, #choices))
+    end
+    imgui.same_line()
+    local shown = "(missing)"
+    if pos ~= nil and choices[pos + 1] ~= nil then
+        shown = choices[pos + 1].name
+    end
+    imgui.text("[" .. shown .. "]")
+    imgui.same_line()
+    if imgui.button(">##next" .. id) then
+        result = choice_index(choices, cycle(pos, 1, #choices))
+    end
+    return result
 end
 
 local function ui_text_colored(text, color)
@@ -1669,7 +1692,7 @@ local function draw_preview()
     if imgui.button("Close##close_preview") then ui.show_preview = nil end
 end
 
-local function draw_link_row(link, i, choices, labels)
+local function draw_link_row(link, i, choices)
     local changed = false
     if imgui.checkbox("##on" .. i, link.enabled ~= false) then
         link.enabled = not link.enabled
@@ -1677,25 +1700,33 @@ local function draw_link_row(link, i, choices, labels)
     end
     imgui.same_line()
     imgui.text(tostring(link.label))
-    imgui.same_line()
 
-    local c, pick = imgui.combo("##set" .. i,
-        combo_pos(choices, link.item_set or 0), labels)
-    if c then
-        local idx = choice_index(choices, pick)
-        if idx ~= nil then
-            link.item_set = idx
-            link.item_set_name = item_set_name(idx)
-            changed = true
-        end
-    end
+    safe(function() imgui.indent(14) end)
+
+    imgui.text("Item set:")
     imgui.same_line()
-    local mc, mi = imgui.combo("##mode" .. i, mode_to_index(link.mode), mode_labels())
-    if mc then
-        link.mode = mode_from_index(mi)
+    local idx = item_set_picker("s" .. i, choices, link.item_set)
+    if idx ~= nil then
+        link.item_set = idx
+        link.item_set_name = item_set_name(idx)
+        changed = true
+    end
+
+    imgui.text("Match:")
+    imgui.same_line()
+    local mpos = mode_to_index(link.mode)
+    if imgui.button("<##mprev" .. i) then
+        link.mode = mode_from_index(cycle(mpos, -1, #MODES + 1))
         changed = true
     end
     imgui.same_line()
+    imgui.text("[" .. mode_label_at(mpos) .. "]")
+    imgui.same_line()
+    if imgui.button(">##mnext" .. i) then
+        link.mode = mode_from_index(cycle(mpos, 1, #MODES + 1))
+        changed = true
+    end
+
     if imgui.button("Preview##p" .. i) then preview(link) end
     imgui.same_line()
     if imgui.button("Apply##a" .. i) then
@@ -1707,6 +1738,8 @@ local function draw_link_row(link, i, choices, labels)
         table.remove(config.links, i)
         changed = true
     end
+
+    safe(function() imgui.unindent(14) end)
     return changed
 end
 
@@ -1721,9 +1754,9 @@ local function draw_ui()
     local c2, v2 = imgui.checkbox("Debug log", config.debug)
     if c2 then config.debug = v2 changed = true end
 
-    local c3, v3 = imgui.checkbox("Ignore weapons (match armour + skills only)", config.ignore_weapons)
+    local c3, v3 = imgui.checkbox("Ignore weapons (armour + skills only)",
+        config.ignore_weapons)
     if c3 then config.ignore_weapons = v3 changed = true end
-    imgui.same_line()
     local c4, v4 = imgui.checkbox("Notify missing items", config.notify_missing)
     if c4 then config.notify_missing = v4 changed = true end
 
@@ -1731,16 +1764,14 @@ local function draw_ui()
     imgui.text("Restock when:")
     local t1, tv1 = imgui.checkbox("Quest accepted", config.triggers.quest_accept)
     if t1 then config.triggers.quest_accept = tv1 changed = true end
-    imgui.same_line()
     local t2, tv2 = imgui.checkbox("Back in the hub", config.triggers.hub_return)
     if t2 then config.triggers.hub_return = tv2 changed = true end
-    imgui.same_line()
     local t3, tv3 = imgui.checkbox("On-screen notice", config.notify)
     if t3 then config.notify = tv3 changed = true end
 
     imgui.separator()
-    -- lazily read the build once when the panel is first opened, so the user
-    -- does not have to wait for a trigger to see what the mod sees
+    -- read the build while open until it resolves, so the panel never sits on
+    -- "(not read yet)" if the first attempt ran too early
     if state.last_sig == nil
         and (state.frames - (state.sig_try_frame or -999)) > 120 then
         state.sig_try_frame = state.frames
@@ -1749,10 +1780,9 @@ local function draw_ui()
     end
     if state.last_sig ~= nil then
         local sig = state.last_sig
-        imgui.text(string.format("Current build: %d armour - %d jewel slots - %s - charm %s",
+        imgui.text(string.format("Current build: %d armour - %d jewel slots - %s",
             sig.armor_count or 0, sig.jewel_count or 0,
-            tostring(sig.weapon_label or "no weapon"),
-            sig.charm and "set" or "none"))
+            tostring(sig.weapon_label or "no weapon")))
         local name, idx, quality, diff = game_loadout_name(sig)
         local loadout_line
         if name == nil then
@@ -1764,18 +1794,20 @@ local function draw_ui()
                 name, idx, tostring(diff or "charm/weapons"))
         end
         imgui.text("Game loadout: " .. loadout_line)
-        imgui.same_line()
-        if imgui.button("Refresh##refresh_top") then
-            state.dirty = true
-            state.last_sig = nil
-            state.sig_try_frame = -999
-            item_name_cache = {}
-            loadout_name_cache = { key = nil, name = nil, index = nil }
-            local fresh = current_signature()
-            if fresh ~= nil then state.last_sig = fresh end
-        end
     else
         imgui.text("Current build: (not read yet)")
+    end
+    if imgui.button("Refresh build") then
+        state.dirty = true
+        item_name_cache = {}
+        loadout_name_cache = { key = nil, name = nil, index = nil }
+        local sig, err = current_signature()
+        if sig == nil then
+            notify("cannot read the current build: " .. tostring(err))
+        else
+            state.last_sig = sig
+            notify("read the current build")
+        end
     end
     if state.last_match ~= nil then
         imgui.text(string.format("Matched: %s -> %s  [%s]",
@@ -1792,93 +1824,102 @@ local function draw_ui()
 
     imgui.separator()
     imgui.text("Links")
-    if #config.links == 0 then
-        imgui.text("No links yet. Wear the build, pick its item set, press "
-            .. "\"Link current build\".")
-    end
     local choices = item_set_choices()
-    local labels = item_set_labels(choices)
+    if #config.links == 0 then
+        imgui.text("No links yet: wear the build, pick an item set below,")
+        imgui.text("press \"Link current build\".")
+    end
     for i = #config.links, 1, -1 do
-        if draw_link_row(config.links[i], i, choices, labels) then changed = true end
+        if draw_link_row(config.links[i], i, choices) then changed = true end
+        imgui.separator()
     end
 
-    imgui.separator()
     imgui.text("New link")
-    if ui.set_index > #choices - 1 then ui.set_index = 0 end
-    imgui.text("Item set:")
-    imgui.same_line()
-    local sc, si = imgui.combo("##new_set", ui.set_index, labels)
-    if sc then ui.set_index = si end
-    imgui.same_line()
-    imgui.text("Match:")
-    imgui.same_line()
-    local mc, mi = imgui.combo("##new_mode", ui.mode_index, mode_labels())
-    if mc then ui.mode_index = mi end
-    imgui.same_line()
-    if imgui.button("Link current build##new_link") then
-        local sig, err = current_signature()
-        if sig == nil then
-            notify("cannot read the current build: " .. tostring(err))
-        else
-            local name, _, quality = game_loadout_name(sig)
-            local label = name
-                and (quality == "full" and name or (name .. " (armour)"))
-                or ("Custom build " .. os.date("%H:%M"))
-            local link = normalize_link({
-                id = tostring(os.time()) .. tostring(math.random(999)),
-                label = label,
-                mode = mode_from_index(ui.mode_index),
-                item_set = choice_index(choices, ui.set_index),
-                item_set_name = item_set_name(choice_index(choices, ui.set_index) or 0),
-                apply_mode = "exact",
-                sig = sig,
-            })
-            if link == nil then
-                notify("could not read enough of the build to link it")
+    if #choices == 0 then
+        ui_text_colored("no item loadouts found - load a save first", 0xFF8080FF)
+    else
+        if ui.set_index > #choices - 1 then ui.set_index = 0 end
+        imgui.text("Item set:")
+        imgui.same_line()
+        if imgui.button("<##new_prev") then
+            ui.set_index = cycle(ui.set_index, -1, #choices)
+        end
+        imgui.same_line()
+        imgui.text("[" .. choices[ui.set_index + 1].name .. "]")
+        imgui.same_line()
+        if imgui.button(">##new_next") then
+            ui.set_index = cycle(ui.set_index, 1, #choices)
+        end
+
+        imgui.text("Match:")
+        imgui.same_line()
+        if imgui.button("<##new_mprev") then
+            ui.mode_index = cycle(ui.mode_index, -1, #MODES + 1)
+        end
+        imgui.same_line()
+        imgui.text("[" .. mode_label_at(ui.mode_index) .. "]")
+        imgui.same_line()
+        if imgui.button(">##new_mnext") then
+            ui.mode_index = cycle(ui.mode_index, 1, #MODES + 1)
+        end
+
+        if imgui.button("Link current build") then
+            local sig, err = current_signature()
+            if sig == nil then
+                notify("cannot read the current build: " .. tostring(err))
             else
-                config.links[#config.links + 1] = link
-                state.last_sig = sig
-                changed = true
-                notify("linked " .. label .. " -> "
-                    .. tostring(link.item_set_name or link.item_set))
+                local name, _, quality = game_loadout_name(sig)
+                local label = name
+                    and (quality == "full" and name or (name .. " (armour)"))
+                    or ("Custom build " .. os.date("%H:%M"))
+                local target = choice_index(choices, ui.set_index)
+                local link = normalize_link({
+                    id = tostring(os.time()) .. tostring(math.random(999)),
+                    label = label,
+                    mode = mode_from_index(ui.mode_index),
+                    item_set = target,
+                    item_set_name = item_set_name(target or 0),
+                    apply_mode = "exact",
+                    sig = sig,
+                })
+                if link == nil then
+                    notify("could not read enough of the build to link it")
+                elseif target == nil then
+                    notify("no item set selected")
+                else
+                    config.links[#config.links + 1] = link
+                    state.last_sig = sig
+                    changed = true
+                    notify("linked " .. label .. " -> "
+                        .. tostring(link.item_set_name or link.item_set))
+                end
             end
         end
-    end
-    imgui.same_line()
-    if imgui.button("Apply now##apply_now") then
-        state.dirty = true
-        fire("manual")
-    end
-
-    -- second row, so the buttons are always reachable
-    if imgui.button("Refresh build##refresh") then
-        state.dirty = true
-        item_name_cache = {}
-        loadout_name_cache = { key = nil, name = nil, index = nil }
-        local sig, err = current_signature()
-        if sig == nil then
-            notify("cannot read the current build: " .. tostring(err))
-        else
-            state.last_sig = sig
-            notify("read the current build")
+        imgui.same_line()
+        if imgui.button("Apply now") then
+            state.dirty = true
+            fire("manual")
         end
-    end
-    imgui.same_line()
-    if imgui.button("Apply linked set now##apply_linked") then
-        state.dirty = true
-        fire("manual")
     end
 
     imgui.separator()
-    imgui.text("Default item set (used when no link matches):")
+    imgui.text("Default item set when no link matches:")
     imgui.same_line()
-    local dl = { "(none)" }
-    for _, c in ipairs(choices) do dl[#dl + 1] = c.name end
-    local dc, di = imgui.combo("##default_set",
-        combo_pos(choices, config.default_item_set or 0) + 1, dl)
-    if dc then
-        config.default_item_set = (di == 0) and nil
-            or choice_index(choices, di - 1)
+    local default_pos = (choice_pos(choices, config.default_item_set) or -1) + 1
+    if imgui.button("<##def_prev") then
+        default_pos = cycle(default_pos, -1, #choices + 1)
+        config.default_item_set = (default_pos == 0) and nil
+            or choice_index(choices, default_pos - 1)
+        changed = true
+    end
+    imgui.same_line()
+    imgui.text("[" .. (config.default_item_set and
+        tostring(item_set_name(config.default_item_set) or "?") or "(none)") .. "]")
+    imgui.same_line()
+    if imgui.button(">##def_next") then
+        default_pos = cycle(default_pos, 1, #choices + 1)
+        config.default_item_set = (default_pos == 0) and nil
+            or choice_index(choices, default_pos - 1)
         changed = true
     end
 
@@ -1890,29 +1931,18 @@ local function draw_ui()
     if ui.show_diag then
         imgui.text("gear source: " .. tostring(state.last_gear_source or "-"))
         imgui.text("slot layout: " .. tostring(last_slot_layout or "-"))
+        imgui.text("slot score: " .. tostring(last_base_score or "-"))
         if state.last_sig ~= nil then
             imgui.text("worn: armour " .. tostring(#(state.last_sig.armor_ids or {}))
                 .. " | weapons " .. tostring(#(state.last_sig.weapon_ids or {}))
                 .. " (" .. table.concat(state.last_sig.weapon_ids or {}, " ") .. ")"
                 .. " | charm " .. tostring(state.last_sig.charm_id or "-"))
         end
-        imgui.text("slot base score: " .. tostring(last_base_score or "-"))
-        imgui.text("item sets: " .. tostring(#item_sets()))
-        imgui.text("pouch slots: " .. tostring(#pouch_works()))
-        imgui.text("box slots: " .. tostring(#box_works()))
-        imgui.text("skill source: " .. tostring(skill_source_error or "ok"))
-        local cands = apply_candidates()
-        imgui.text("apply candidates: " .. tostring(#cands))
-        for i, cand in ipairs(cands) do
-            if i <= 8 then
-                imgui.text("  " .. cand.type .. "." .. cand.name
-                    .. " (" .. tostring(cand.params) .. (cand.static and ", static)" or ")"))
-            end
-        end
-        if #cands == 0 then
-            ui_text_colored("no apply method found - top-up from the box is the "
-                .. "active path (run the probe to extend the candidate list)", 0xFF80FFFF)
-        end
+        imgui.text("item sets: " .. tostring(#choices) .. " real / "
+            .. tostring(#item_sets()) .. " slots")
+        imgui.text("pouch slots: " .. tostring(#pouch_works())
+            .. " | box slots: " .. tostring(#box_works()))
+        imgui.text("apply candidates: " .. tostring(#apply_candidates()))
         if imgui.button("Export links") then
             safe(function()
                 json.dump_file(LINKS_FILE, { version = VERSION, links = config.links })
@@ -1939,7 +1969,7 @@ local function draw_ui()
 
     if changed then save_config() end
     imgui.separator()
-    imgui.text("restock happens through the game's item-set path; nothing is created.")
+    imgui.text("restock uses the game's item-set path; nothing is created.")
     imgui.tree_pop()
 end
 
