@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.9 — dropdowns pick the entry you clicked
+
+Reported in game: "when I select link selected armor set, it is linking the
+armor set from above it, not the one I picked".
+
+Cause: `imgui.combo` in REFramework does not speak in 0-based positions. It
+takes the **table key** of the current entry, previews `values[selection]`,
+returns the **key** of the clicked entry and iterates the label table. The
+picker passed its 0-based position straight in and used the returned key as a
+position, so the preview and the value used were always one entry apart.
+
+- `labeled_dropdown` now converts on both boundaries: position + 1 going in, key
+  - 1 coming out, with a range check so a stale key can never pick a stranger.
+- Every dropdown goes through it: armour set, item set, match mode, default item
+  set and the per-link item set / match rows.
+- `logic_test` pins the convention down with fake combos (position 0 -> key 1,
+  click key 3 -> position 2, out-of-range clamps, out-of-table keys ignored).
+
+Links made in 0.1.8 may point at the item set below the one that was shown;
+worth checking the row after reloading.
+
 ## 0.1.8 — every set is selectable, and the pickers report what they see
 
 Reported in game: "it still does not let me select the HH item set from the

@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.8"
+local VERSION = "0.1.9"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1738,14 +1738,23 @@ local function dropdown_width()
     return w
 end
 
--- label on one line, dropdown on the next. Returns the new position or nil.
+-- label on one line, dropdown on the next. Returns the new 0-based position,
+-- or nil when nothing was picked.
+--
+-- REFramework's imgui.combo speaks in *table keys*: it previews values[sel],
+-- returns the key of the clicked entry, and its popup iterates the table. So
+-- the callers' 0-based positions are converted here (an array is keyed
+-- 1..#labels) and converted back on the way out. Passing the position straight
+-- through picked the entry one below the one clicked.
 local function labeled_dropdown(label, id, pos, labels)
     if type(labels) ~= "table" or #labels == 0 then labels = { "(none)" } end
     if pos == nil or pos < 0 or pos > #labels - 1 then pos = 0 end
     imgui.text(label)
     safe(function() imgui.set_next_item_width(dropdown_width()) end)
-    local changed, newpos = imgui.combo(id, pos, labels)
-    if changed then return newpos end
+    local changed, key = imgui.combo(id, pos + 1, labels)
+    if changed and type(key) == "number" and key >= 1 and key <= #labels then
+        return key - 1
+    end
     return nil
 end
 
@@ -2179,6 +2188,7 @@ LR._test = {
     normalize_link = normalize_link,
     mode_from_index = mode_from_index,
     mode_to_index = mode_to_index,
+    labeled_dropdown = labeled_dropdown,
     default_config = default_config,
     MODES = MODES,
     MODE_GROUPS = MODE_GROUPS,

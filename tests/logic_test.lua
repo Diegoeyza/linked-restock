@@ -366,5 +366,40 @@ end
 -- summary
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- dropdown: REFramework's imgui.combo speaks in table keys, not positions
+-- ---------------------------------------------------------------------------
+
+imgui.text = noop
+imgui.set_next_item_width = noop
+local labels = { "Base", "Shrooms", "HH" }
+
+imgui.combo = function(_, sel, _)
+    eq(sel, 1, "the combo receives a 1-based key for position 0")
+    return true, 3 -- the user clicked the third entry
+end
+eq(T.labeled_dropdown("Item set", "##pick", 0, labels), 2,
+    "clicking the third entry returns 0-based position 2")
+
+imgui.combo = function(_, sel, _)
+    eq(sel, 3, "position 2 is handed over as key 3")
+    return false, 0
+end
+eq(T.labeled_dropdown("Item set", "##pick", 2, labels), nil,
+    "no change leaves the position alone")
+
+imgui.combo = function(_, sel, _)
+    eq(sel, 1, "an out-of-range position is clamped to the first key")
+    return true, 1
+end
+eq(T.labeled_dropdown("Item set", "##pick", 99, labels), 0,
+    "an out-of-range position falls back to the first entry")
+
+imgui.combo = function()
+    return true, 99 -- a key outside the table must never be used
+end
+eq(T.labeled_dropdown("Item set", "##pick", 0, labels), nil,
+    "a key outside the list is ignored")
+
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end
