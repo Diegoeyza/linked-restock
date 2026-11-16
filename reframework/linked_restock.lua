@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.9"
+local VERSION = "0.1.10"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -257,26 +257,54 @@ end
 
 -- Canonical string for one build under one mode. Two builds match when their
 -- keys are equal, so the key format must be stable across sessions.
+local GROUP_NAMES = {
+    armor = "armour pieces",
+    jewels = "skills (jewels)",
+    charm = "charm",
+    weapon = "weapon",
+}
+
+local function group_key(sig, g, charm_type_only)
+    if sig == nil then return nil end
+    if g == "armor" then
+        return "A:" .. table.concat(sorted_list(sig.armor), "|")
+    elseif g == "charm" then
+        if charm_type_only and sig.charm_id ~= nil then
+            return "C:" .. tostring(sig.charm_id)
+        end
+        return "C:" .. tostring(sig.charm or "")
+    elseif g == "jewels" then
+        return "J:" .. table.concat(sorted_list(sig.jewels), ";")
+    elseif g == "weapon" then
+        return "W:" .. tostring(sig.weapon or "")
+    end
+    return nil
+end
+
 local function sig_key(sig, mode, charm_type_only)
     if sig == nil then return nil end
-    local groups = MODE_GROUPS[mode] or MODE_GROUPS.full
     local parts = {}
-    for _, g in ipairs(groups) do
-        if g == "armor" then
-            parts[#parts + 1] = "A:" .. table.concat(sorted_list(sig.armor), "|")
-        elseif g == "charm" then
-            if charm_type_only and sig.charm_id ~= nil then
-                parts[#parts + 1] = "C:" .. tostring(sig.charm_id)
-            else
-                parts[#parts + 1] = "C:" .. tostring(sig.charm or "")
-            end
-        elseif g == "jewels" then
-            parts[#parts + 1] = "J:" .. table.concat(sorted_list(sig.jewels), ";")
-        elseif g == "weapon" then
-            parts[#parts + 1] = "W:" .. tostring(sig.weapon or "")
-        end
+    for _, g in ipairs(MODE_GROUPS[mode] or MODE_GROUPS.full) do
+        parts[#parts + 1] = group_key(sig, g, charm_type_only)
     end
     return table.concat(parts, "#")
+end
+
+-- Why a link does not match the build in hand: the names of the groups whose
+-- key differs, or nil when it matches. Used by the panel so a refusal is never
+-- a bare "no match".
+local function link_mismatch(link, sig, cfg)
+    if sig == nil or link == nil then return "the build has not been read" end
+    local mode = mode_of(link, cfg)
+    local loose = (link.origin == "loadout")
+    local bad = {}
+    for _, g in ipairs(MODE_GROUPS[mode] or MODE_GROUPS.full) do
+        if group_key(sig, g, loose) ~= group_key(link.sig, g, loose) then
+            bad[#bad + 1] = GROUP_NAMES[g] or g
+        end
+    end
+    if #bad == 0 then return nil end
+    return "differs: " .. table.concat(bad, ", ")
 end
 
 -- First link whose key matches the current build. The strictest link wins:
@@ -1540,6 +1568,26 @@ local function fire(reason)
     return true
 end
 
+-- What would match the build in hand, without touching the pouch. The panel
+-- shows this, so switching loadouts updates it without waiting for a trigger.
+local function preview_match(sig)
+    if sig == nil then
+        return { why = "the build has not been read yet" }
+    end
+    local link, mode, why = resolve_link(sig, config.links, config)
+    if link ~= nil then
+        return { link = link, mode = mode, why = why }
+    end
+    local wt = current_weapon_type()
+    local idx = wt ~= nil and config.fallback_by_weapon[tostring(wt)] or nil
+    local kind = "weapon-type fallback"
+    if idx == nil then
+        idx = config.default_item_set
+        kind = "default item set"
+    end
+    return { fallback = idx, fallback_kind = kind, why = why }
+end
+
 local function poll()
     local q = in_quest()
     if q == nil then return end
@@ -1802,7 +1850,7 @@ local function draw_preview()
     if imgui.button("Close##close_preview") then ui.show_preview = nil end
 end
 
-local function draw_link_row(link, i, choices)
+local function draw_link_row(link, i, choices, live_sig)
     local changed = false
     if imgui.checkbox("##on" .. i, link.enabled ~= false) then
         link.enabled = not link.enabled
@@ -1833,6 +1881,15 @@ local function draw_link_row(link, i, choices)
     if mpos ~= nil then
         link.mode = mode_from_index(mpos)
         changed = true
+    end
+
+    local why = link_mismatch(link, live_sig, config)
+    if live_sig == nil then
+        imgui.text("  (build not read yet)")
+    elseif why == nil then
+        ui_text_colored("  matches the worn build", 0xFF80FF80)
+    else
+        ui_text_colored("  no match - " .. why, 0xFF8080FF)
     end
 
     if imgui.button("Preview##p" .. i) then preview(link) end
@@ -1878,10 +1935,9 @@ local function draw_ui()
     if t3 then config.notify = tv3 changed = true end
 
     imgui.separator()
-    -- read the build while open until it resolves, so the panel never sits on
-    -- "(not read yet)" if the first attempt ran too early
-    if state.last_sig == nil
-        and (state.frames - (state.sig_try_frame or -999)) > 120 then
+    -- re-read the worn build while the panel is open: changing loadout in game
+    -- must update this line without pressing anything
+    if state.frames - (state.sig_try_frame or -999) > 30 then
         state.sig_try_frame = state.frames
         local sig = current_signature()
         if sig ~= nil then state.last_sig = sig end
@@ -1917,13 +1973,24 @@ local function draw_ui()
             notify("read the current build")
         end
     end
+    local live = preview_match(state.last_sig)
+    if live.link ~= nil then
+        ui_text_colored(string.format("Matched now: %s -> %s  [%s]",
+            tostring(live.link.label),
+            tostring(live.link.item_set_name or "-"),
+            tostring(live.mode)), 0xFF80FF80)
+    elseif live.fallback ~= nil then
+        imgui.text(string.format("Matched now: %s - %s", tostring(live.fallback_kind),
+            tostring(item_set_name(live.fallback) or live.fallback)))
+    else
+        ui_text_colored("Matched now: no link for this build ("
+            .. tostring(live.why) .. ")", 0xFF8080FF)
+    end
     if state.last_match ~= nil then
-        imgui.text(string.format("Matched: %s -> %s  [%s]",
+        imgui.text(string.format("Last fired: %s -> %s  [%s]",
             tostring(state.last_match.label),
             tostring(state.last_match.item_set_name or "-"),
             tostring(state.last_match.mode)))
-    else
-        imgui.text("Matched: nothing yet")
     end
     imgui.text("Last: " .. tostring(state.last_result))
     if state.task ~= nil then
@@ -1938,7 +2005,9 @@ local function draw_ui()
         imgui.text("press \"Link current build\".")
     end
     for i = #config.links, 1, -1 do
-        if draw_link_row(config.links[i], i, choices) then changed = true end
+        if draw_link_row(config.links[i], i, choices, state.last_sig) then
+            changed = true
+        end
         imgui.separator()
     end
 
@@ -2189,6 +2258,8 @@ LR._test = {
     mode_from_index = mode_from_index,
     mode_to_index = mode_to_index,
     labeled_dropdown = labeled_dropdown,
+    link_mismatch = link_mismatch,
+    group_key = group_key,
     default_config = default_config,
     MODES = MODES,
     MODE_GROUPS = MODE_GROUPS,

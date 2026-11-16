@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.10 — the panel shows the live match, and why a link refuses
+
+Reported in game: "I made a linked set with conga and HH, but when I switched to
+the conga loadout, the matched says nothing yet".
+
+`Matched:` was only written inside the trigger path, so it stayed on "nothing
+yet" until a quest was accepted or the hub was entered — and the worn build was
+only re-read when you pressed Refresh, so a loadout switched in game was never
+noticed. The panel is now live:
+
+- The worn build is re-read twice a second while the panel is open, so
+  `Current build` follows a loadout switch by itself.
+- **Matched now:** runs the real resolution every frame and shows either the
+  link (`Conga -> HH [armour + charm]`), the fallback, or
+  `no link for this build (no link matches this build)`.
+- Each link row ends with **matches the worn build** or
+  **no match - differs: armour pieces, charm** — the mismatching groups by name,
+  computed per group under that link's own mode.
+- The previous fire-time line is kept as `Last fired:`.
+
+Note for links made before 0.1.9: their stored signature can belong to the
+entry one row off (the dropdown bug), so a link labelled `Conga` may hold
+`DPS Omega`'s armour. Remove and re-create it.
+
 ## 0.1.9 — dropdowns pick the entry you clicked
 
 Reported in game: "when I select link selected armor set, it is linking the

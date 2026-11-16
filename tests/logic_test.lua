@@ -233,6 +233,41 @@ end
 -- diff / preview
 -- ---------------------------------------------------------------------------
 
+group("link_mismatch")
+do
+    local cfg = { ignore_weapons = false }
+    eq(T.link_mismatch(link({ mode = "full" }), sig(), cfg), nil,
+        "an identical build matches")
+    eq(T.link_mismatch(link({ mode = "full" }),
+        sig({ armor = { "0:999:9:0:0:0:0:0" } }), cfg),
+        "differs: armour pieces", "armour differences are named")
+    eq(T.link_mismatch(link({ mode = "full" }), sig({ jewels = { "2=9" } }), cfg),
+        "differs: skills (jewels)", "jewel differences are named")
+    eq(T.link_mismatch(link({ mode = "full" }),
+        sig({ charm = "charm:99:0:0:0:0:0:0|0,0,0" }), cfg),
+        "differs: charm", "a charm difference is named")
+    eq(T.link_mismatch(link({ mode = "full" }),
+        sig({ weapon = "13:6:1:0:0:0:0:0" }), cfg),
+        "differs: weapon", "a weapon difference is named")
+    eq(T.link_mismatch(link({ mode = "no_weapon" }),
+        sig({ weapon = "13:6:1:0:0:0:0:0" }), cfg), nil,
+        "no_weapon mode ignores the weapon")
+    eq(T.link_mismatch(link({ mode = "armor" }),
+        sig({ jewels = { "2=9" }, charm = "x" }), cfg), nil,
+        "armor mode only looks at the pieces")
+
+    -- links built from a saved loadout compare the charm by amulet type
+    local l = link({ mode = "gear", origin = "loadout" })
+    l.sig.charm_id = "charm:21"
+    local worn = sig({ charm = "charm:21:0:0:0:0:0:0|9,9,9",
+                       charm_id = "charm:21" })
+    eq(T.link_mismatch(l, worn, cfg), nil,
+        "a loadout link matches the amulet when only its skills differ")
+    local other = sig({ charm = "charm:22:0:0:0:0:0:0", charm_id = "charm:22" })
+    eq(T.link_mismatch(l, other, cfg), "differs: charm",
+        "a different amulet is still a mismatch")
+end
+
 group("compute_diff")
 do
     local contents = {

@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.9 — probe-verified on the live build.** The probe confirmed the
+> **Status: v0.1.10 — probe-verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -83,8 +83,10 @@ under the item-set dropdown repeats the chosen slot and item count. If a set you
 just created is missing, press **Reload lists** (the lists are cached for a
 second).
 
-The panel shows what the mod sees: the armour count, the charm, how many
-skills, the weapon, and the game loadout the build belongs to. If it says
+The panel is live: it re-reads the worn gear twice a second and prints
+**Matched now:** for the build you are wearing, plus a verdict on every link row
+(`matches the worn build`, or `no match - differs: armour pieces, charm`), so a
+loadout switch is visible without pressing anything or waiting for a trigger. If it says
 "not read yet" nothing has been equipped/loaded yet; press *Refresh*.
 
 ## How it works
