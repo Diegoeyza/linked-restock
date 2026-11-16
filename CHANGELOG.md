@@ -47,7 +47,7 @@ Built from `linked_restock_probe_*.json` on the live build (2026-11-15).
   the original index the apply call expects.
 - Panel: "N jewel slots" instead of a skill count; the diagnostics show the slot
   layout score.
-- Tests: 151 assertions (logic 80, pipeline 44, gear 27); `gear_test.lua` now
+- Tests: 155 assertions (logic 80, pipeline 44, gear 27); `gear_test.lua` now
   mirrors the probe's slot layout and asserts the confirmed apply call runs.
 
 ## 0.1.0 — first build
