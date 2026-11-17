@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.47 — the trace survives a missing `io`, and a regression is caught by the tests
+
+- **Trace without `io`.** REFramework does not expose `io` here (that is why the
+  trace file never existed): the mod now keeps a 200-line ring buffer and rewrites
+  `reframework/data/linked_restock_trace.json` with `json.dump_file` on every
+  event, which is known to work on this install. One log line says which backend
+  is in use.
+- **Regression fixed.** The 0.1.46 rewrite of the camp lookup deleted the
+  `camp_seen` and `enum_label` locals; `enum_label` then resolved to a nil global,
+  the flow line stopped updating, and every gate test still passed because the
+  fake world sets globals. Both are restored.
+- **`tests/run.sh` now refuses unexpected globals.** It compiles the mod with the
+  matching `luac` and fails on any `GETGLOBAL` that is not one of REFramework's
+  own. This is the check that would have caught it.
+
 ## 0.1.46 — the camp manager has a proper owner, and the pouch question is answered
 
 **Camp manager.** `sdk.get_native_singleton("app.cCampManager")` did return

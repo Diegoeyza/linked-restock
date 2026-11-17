@@ -26,6 +26,34 @@ if [ -z "$LUA_BIN" ]; then
     exit 2
 fi
 
+# A misplaced `local` turns a table into a nil global and every test still
+# passes, because the fake world sets it. Catch that here: compile the mod and
+# reject any global that is not one of REFramework's own.
+LUAC_BIN="${LUAC:-}"
+if [ -z "$LUAC_BIN" ] && [ -x "$(dirname "$LUA_BIN")/luac" ]; then
+    LUAC_BIN="$(dirname "$LUA_BIN")/luac"
+fi
+if [ -n "$LUAC_BIN" ]; then
+    "$LUAC_BIN" -p reframework/linked_restock.lua || exit 1
+    EXPECTED_GLOBALS="_G draw imgui io ipairs json log math os pairs pcall re sdk string table tonumber tostring type unpack"
+    seen=$("$LUAC_BIN" -l -p reframework/linked_restock.lua \
+        | sed -n 's/.*GETGLOBAL.*; //p; s/.*GETGLOBAL.*- *[0-9][0-9]* *; //p' \
+        | sort -u | tr '\n' ' ')
+    extra=""
+    for g in $seen; do
+        case " $EXPECTED_GLOBALS " in
+            *" $g "*) ;;
+            *) extra="$extra $g" ;;
+        esac
+    done
+    if [ -n "$extra" ]; then
+        echo "unexpected globals in the mod:$extra" >&2
+        exit 1
+    fi
+else
+    echo "note: no luac next to $LUA_BIN, skipping the globals check" >&2
+fi
+
 status=0
 for test_file in tests/logic_test.lua tests/pipeline_test.lua tests/gear_test.lua; do
     echo "== $test_file"

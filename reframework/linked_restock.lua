@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.46"
+local VERSION = "0.1.47"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -134,10 +134,28 @@ local trace_off = false
 local trace_path = nil
 local trace_probed = false
 
+-- If `io` is missing (REFramework can sandbox it), the breadcrumb still has to
+-- exist: keep a ring buffer and rewrite it with json.dump_file, which is known to
+-- work on this install.
+local trace_ring = {}
+local trace_ring_max = 200
+
+local function trace_ring_add(text)
+    trace_ring[#trace_ring + 1] = os.date("%Y-%m-%d %H:%M:%S ") .. tostring(text)
+    while #trace_ring > trace_ring_max do table.remove(trace_ring, 1) end
+    -- `safe` is declared below this block, so plain pcall here
+    pcall(function()
+        json.dump_file("linked_restock_trace.json",
+            { version = VERSION, lines = trace_ring })
+    end)
+end
+
 local function trace(text)
     if trace_off then return end
     if type(io) ~= "table" or type(io.open) ~= "function" then
         trace_off = true
+        trace_ring_add("trace: io unavailable, using linked_restock_trace.json")
+        log.info("[LinkedRestock] trace: io unavailable, writing json instead")
         return
     end
     local ok = pcall(function()
@@ -160,6 +178,7 @@ local function trace(text)
             if trace_fh == nil then
                 trace_off = true
                 log.info("[LinkedRestock] trace: io.open failed for every path")
+                trace_ring_add("trace: io.open failed, using linked_restock_trace.json")
                 return
             end
             if not trace_probed then
@@ -343,6 +362,25 @@ local function camp_manager()
         return found
     end
     return nil
+end
+
+-- Set once the game has shown us a camp zone: from that point on a hub restock
+-- waits for it, instead of trusting "out of quest + loaded" alone.
+local camp_seen = false
+
+-- "Name(3)" for an enum value when the game will stringify it, plain number
+-- otherwise. Splitting hub from field by a name beats remembering a magic int.
+local function enum_label(v)
+    if v == nil then return nil end
+    local n = enum_number(v)
+    local text = safe(function() return v:call("ToString") end)
+    if type(text) ~= "string" or text == "" then
+        text = safe(function() return v:call("ToString()") end)
+    end
+    if type(text) == "string" and text ~= "" and text ~= tostring(n) then
+        return text .. "(" .. tostring(n) .. ")"
+    end
+    return tostring(n)
 end
 
 local function hub_camp_state()
