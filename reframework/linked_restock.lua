@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.30"
+local VERSION = "0.1.31"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -2980,32 +2980,57 @@ local function draw_ui()
             if idx == nil then
                 notify("no link or default item set to test")
             else
-                local apply = static_method("app.ItemMySetUtil",
-                    "applyMySetToPouch(System.Int32)")
                 local parts = {}
-                parts[#parts + 1] = "free=" .. tostring(pouch_free_slots())
-                if apply == nil then
-                    parts[#parts + 1] = "applyMySetToPouch missing"
-                else
-                    local arg = idx - 1
-                    local ok, err = pcall(function() apply:call(nil, arg) end)
-                    parts[#parts + 1] = string.format("apply(%d)=%s", arg,
-                        ok and "ok" or tostring(err))
-                    if not ok then
-                        local freed, why = free_pouch_slot(idx)
-                        parts[#parts + 1] = freed
-                            and ("freed " .. tostring(freed))
-                            or ("free failed: " .. tostring(why))
-                        if freed ~= nil then
-                            local ok2, err2 = pcall(function()
-                                apply:call(nil, arg)
-                            end)
-                            parts[#parts + 1] = "retry=" .. (ok2 and "ok"
-                                or tostring(err2))
-                        end
-                    end
+                local function total()
+                    local n = 0
+                    for _, c in pairs(pouch_snapshot()) do n = n + c end
+                    return n
                 end
-                notify("game apply: " .. table.concat(parts, " | "))
+                -- every step reports whether the pouch moved: an "ok" that
+                -- changes nothing is as informative as a throw
+                local function step(label, fn)
+                    local before = total()
+                    local ok, err = pcall(fn)
+                    local after = total()
+                    parts[#parts + 1] = string.format("%s %s(%d->%d)", label,
+                        ok and "ok" or ("ERR " .. tostring(err)), before, after)
+                end
+
+                parts[#parts + 1] = "free=" .. tostring(pouch_free_slots())
+
+                step("apply(set)", function()
+                    local m = static_method("app.ItemMySetUtil",
+                        "apply(app.savedata.cItemMySet)")
+                    if m == nil then error("missing apply(set)") end
+                    local set = item_sets()[idx]
+                    if set == nil then error("item set " .. tostring(idx) .. " is nil") end
+                    m:call(nil, set)
+                end)
+
+                step("applyMySetToPouch(" .. tostring(idx - 1) .. ")", function()
+                    local m = static_method("app.ItemMySetUtil",
+                        "applyMySetToPouch(System.Int32)")
+                    if m == nil then error("missing applyMySetToPouch") end
+                    m:call(nil, idx - 1)
+                end)
+
+                step("fillPouchItems", function()
+                    local m = static_method("app.ItemUtil", "fillPouchItems()")
+                    if m == nil then error("missing fillPouchItems") end
+                    m:call(nil)
+                end)
+
+                step("free+apply", function()
+                    local freed, why = free_pouch_slot(idx)
+                    if freed == nil then error(tostring(why)) end
+                    local m = static_method("app.ItemMySetUtil",
+                        "applyMySetToPouch(System.Int32)")
+                    m:call(nil, idx - 1)
+                end)
+
+                local text = "game apply: " .. table.concat(parts, " | ")
+                log.info("[LinkedRestock] " .. text)
+                notify(text)
             end
         end
         if imgui.button("Dump flow API##dump_api") then
