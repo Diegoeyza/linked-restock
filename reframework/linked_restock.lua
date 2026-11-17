@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.34"
+local VERSION = "0.1.35"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1576,14 +1576,14 @@ local function game_set_name(arg)
     return safe_str(field_value(set, "Name"))
 end
 
-local function strategies_for(link, index, auto, exact)
+-- Every restock is done with save-data writes: return what the set does not
+-- list to the item box, then top the pouch up from it. The game's own apply is
+-- not used at all any more - it threw on empty sets and, twice, took the client
+-- down with an access violation right after a quest. The writes produce the same
+-- pouch contents without calling into the game.
+local function strategies_for(link, index)
     local list = {}
-    local set_obj = item_sets()[index]
-    local contents = item_set_contents(index) or {}
-    -- the game's apply throws on an empty slot, and that has crashed the client
-    local may_call_game = ((not auto) or exact) and #contents > 0
-
-    if not may_call_game and (link.apply_mode ~= "topup") then
+    if link.apply_mode ~= "topup" then
         list[#list + 1] = {
             label = "return extras to the item box",
             run = function()
@@ -1592,50 +1592,6 @@ local function strategies_for(link, index, auto, exact)
             end,
         }
     end
-
-    -- the object form has no index to get wrong, so it goes first
-    local apply_set = may_call_game and static_method("app.ItemMySetUtil",
-        "apply(app.savedata.cItemMySet)")
-    if apply_set ~= nil and set_obj ~= nil then
-        list[#list + 1] = {
-            label = "ItemMySetUtil.apply(set)",
-            game = true,
-            run = function()
-                local m = static_method("app.ItemMySetUtil",
-                    "apply(app.savedata.cItemMySet)")
-                if m == nil then error("apply(cItemMySet) is not available") end
-                local set = item_sets()[index]
-                if set == nil then
-                    error("item set " .. tostring(index) .. " is gone")
-                end
-                m:call(nil, set)
-                return true
-            end,
-        }
-    end
-
-    local apply_pouch = may_call_game and static_method("app.ItemMySetUtil",
-        "applyMySetToPouch(System.Int32)")
-    if apply_pouch ~= nil then
-        for _, base in ipairs({ index - 1, index }) do
-            if item_set_valid(base) ~= false then
-                list[#list + 1] = {
-                    label = "ItemMySetUtil.applyMySetToPouch(" .. tostring(base) .. ")",
-                    game = true,
-                    run = function()
-                        local m = static_method("app.ItemMySetUtil",
-                            "applyMySetToPouch(System.Int32)")
-                        if m == nil then
-                            error("applyMySetToPouch is not available")
-                        end
-                        m:call(nil, base)
-                        return true
-                    end,
-                }
-            end
-        end
-    end
-
     list[#list + 1] = {
         label = "top-up from the item box",
         -- the diff is refreshed before every attempt: the pouch can be swapped
@@ -1709,8 +1665,7 @@ local function start_task(link, reason, retry, exact)
         missing = missing,
         mode = mode,
         auto = auto,
-        exact = exact == true,
-        strategies = strategies_for(link, index, auto, exact),
+        strategies = strategies_for(link, index),
         try = 1,
         attempts = 0,
         wait = 0,
@@ -1719,13 +1674,11 @@ local function start_task(link, reason, retry, exact)
         trace = {},
         retry = retry or 0,
     }
-    if #diff == 0 and not exact then
+    if #diff == 0 then
         state.task = nil
         notify("pouch already stocked for " .. tostring(link.item_set_name or index))
         return true
     end
-    -- an exact pass runs even when nothing is planned: the game's own apply is
-    -- what trims extras and fixes slot order
 
     return true
 end
@@ -1809,7 +1762,6 @@ local function finish_task(ok, detail)
         if (task.retry or 0) < limit and task.link ~= nil then
             state.pending_retry = {
                 link = task.link, reason = task.reason, auto = task.auto,
-                exact = task.exact,
                 retry = (task.retry or 0) + 1, at = state.frames + 240,
             }
             note("will retry " .. label .. " in a few seconds")
@@ -2034,7 +1986,7 @@ local function current_weapon_type()
     return nil
 end
 
-local function fire(reason, exact)
+local function fire(reason)
     if not config.enabled then
         note("disabled, nothing fired (" .. tostring(reason) .. ")")
         return false
@@ -2068,7 +2020,7 @@ local function fire(reason, exact)
     }
     state.last_fire = { reason = reason, at = state.frames,
                         label = link.label }
-    local ok, err2 = start_task(link, reason, nil, exact)
+    local ok, err2 = start_task(link, reason)
     if not ok then
         note("cannot restock: " .. tostring(err2 or "unknown"))
         return false
@@ -2247,14 +2199,14 @@ local function poll()
             -- exact = false: automatic restocks use save-data writes only.
             -- Calling the game's apply after a quest has crashed the client
             -- twice, and the writes now produce the same exact pouch.
-            fire("back in the hub", false)
+            fire("back in the hub")
         elseif state.hub_wait > READY_RETRY_POLLS * 3 then
             -- the strict gate never opened (a getter misbehaving) but the game
             -- is out of the quest and loaded: top up without game code
             state.hub_done_seq = state.quest_seq
             state.hub_wait = 0
             note("hub gate stuck (" .. tostring(gate_why) .. "), topping up")
-            fire("back in the hub", false)
+            fire("back in the hub")
         end
     end
 
@@ -2276,7 +2228,7 @@ local function on_frame()
                 log.info("[LinkedRestock] retrying " .. tostring(r.link.label)
                     .. " (" .. tostring(r.retry) .. ")")
             end
-            start_task(r.link, r.reason, r.retry, r.exact)
+            start_task(r.link, r.reason, r.retry)
         end
     end
     local ok, err = pcall(tick_task)
@@ -3000,67 +2952,6 @@ local function draw_ui()
         imgui.text("pouch slots: " .. tostring(#pouch_works())
             .. " | box slots: " .. tostring(#box_works()))
         imgui.text("apply candidates: " .. tostring(#apply_candidates()))
-        if imgui.button("Test game apply##test_apply") then
-            local target = nil
-            for _, l in ipairs(config.links) do
-                if l.enabled ~= false then target = l break end
-            end
-            local idx = target and target.item_set or config.default_item_set
-            if idx == nil then
-                notify("no link or default item set to test")
-            else
-                local parts = {}
-                local function total()
-                    local n = 0
-                    for _, c in pairs(pouch_snapshot()) do n = n + c end
-                    return n
-                end
-                -- every step reports whether the pouch moved: an "ok" that
-                -- changes nothing is as informative as a throw
-                local function step(label, fn)
-                    local before = total()
-                    local ok, err = pcall(fn)
-                    local after = total()
-                    parts[#parts + 1] = string.format("%s %s(%d->%d)", label,
-                        ok and "ok" or ("ERR " .. tostring(err)), before, after)
-                end
-
-                parts[#parts + 1] = "free=" .. tostring(pouch_free_slots())
-                parts[#parts + 1] = "items="
-                    .. tostring(#(item_set_contents(idx) or {}))
-
-                step("apply(set)", function()
-                    local m = static_method("app.ItemMySetUtil",
-                        "apply(app.savedata.cItemMySet)")
-                    if m == nil then error("missing apply(set)") end
-                    local set = item_sets()[idx]
-                    if set == nil then error("item set " .. tostring(idx) .. " is nil") end
-                    m:call(nil, set)
-                end)
-
-                step("applyMySetToPouch(" .. tostring(idx - 1) .. ")", function()
-                    local m = static_method("app.ItemMySetUtil",
-                        "applyMySetToPouch(System.Int32)")
-                    if m == nil then error("missing applyMySetToPouch") end
-                    m:call(nil, idx - 1)
-                end)
-
-                step("fillPouchItems", function()
-                    local m = static_method("app.ItemUtil", "fillPouchItems()")
-                    if m == nil then error("missing fillPouchItems") end
-                    m:call(nil)
-                end)
-
-                step("trim extras to box", function()
-                    local moved = trim_pouch(idx)
-                    if moved == 0 then error("nothing to trim") end
-                end)
-
-                local text = "game apply: " .. table.concat(parts, " | ")
-                log.info("[LinkedRestock] " .. text)
-                notify(text)
-            end
-        end
         if imgui.button("Dump flow API##dump_api") then
             safe(function() dump_api_impl("button") end)
             notify("wrote reframework/data/linked_restock_api.json")

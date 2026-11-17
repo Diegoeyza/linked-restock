@@ -397,7 +397,7 @@ eq(name, "Guardian Arkveld", "the exact loadout wins over the armour-only one")
 eq(index, 2, "and its index is reported")
 eq(quality, "full", "the match is exact")
 
--- 3) link it and restock through the confirmed apply call
+-- 3) link it and restock through the write path
 T.get_config().links = {
     T.normalize_link({
         id = "l1", label = name, item_set = 1, item_set_name = "Base",
@@ -409,7 +409,7 @@ eq(T.fire("test"), true, "the link resolves for this build")
 check(run_task(), "the restock completes")
 eq(T.pouch_snapshot()[1], 10, "the linked item set landed")
 eq(T.pouch_snapshot()[2], 3, "and so did its second item")
-check(apply_calls >= 1, "applyMySetToPouch was called, not just the top-up")
+eq(apply_calls, 0, "the restock used save-data writes only")
 
 -- 4) the client's bug: swap the weapon, a strict match must refuse
 world.weapon._f.FreeVal1 = 900

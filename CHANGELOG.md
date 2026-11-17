@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.35 — the game's apply is gone from the mod entirely
+
+The last run ended like this:
+
+```
+22:57:12  try return extras to the item box -> true
+22:57:13  try ItemMySetUtil.apply(set) -> true
+22:57:14  VMContext: Caught exception code c0000005   ← access violation
+22:57:14  RIP: 14a4d8897 …                          ← crash
+```
+
+`apply(set)` reported success and the game **crashed a second later**. That is the
+third crash around this call, and none of them were about timing: the game's
+item-set apply itself is not safe to invoke from a script.
+
+- **No game method is called anywhere any more.** Not on the automatic triggers,
+  not on `Apply now`, not in Diagnostics. Every restock is save-data writes:
+  return what the set does not list to the item box, then top the pouch up from
+  it — the same contents a manual apply produces.
+- `start_task` no longer has an "exact pass"; an already matching pouch is a
+  no-op.
+- The Diagnostics "Test game apply" button is removed with the path it tested.
+- Fallback is unchanged and now runs on the safe path: weapon-type set first,
+  then the **default item set** (Base in the current config) when no link
+  matches, trimmed to that set exactly.
+
 ## 0.1.34 — an empty item set is refused, never applied
 
 The client was running with a link pointing at an **unregistered item set**, and

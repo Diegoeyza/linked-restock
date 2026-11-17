@@ -277,19 +277,15 @@ eq(contents[1].count, 5, "first count")
 eq(contents[1].name, "Potion", "first name")
 eq(T.item_set_name(1), "Rompo LBG", "item set name")
 
--- 2) the game's own apply is preferred and verified
+-- 2) the write path restocks, without calling into the game at all
 rebuild_world({ item_work(1, 1) },
     { item_work(1, 9), item_work(2, 9), item_work(3, 9) })
-world.on_apply = function()
-    -- what the game's item-set load leaves behind
-    world.pouch = { item_work(1, 5), item_work(2, 3), item_work(3, 2) }
-    sdm = rebuild_save()
-end
+world.on_apply = function() error("the game apply must not be called") end
 local link = { id = "a", label = "fire", item_set = 1, item_set_name = "Rompo LBG",
                apply_mode = "exact", enabled = true }
 check(T.start_task(link, "test"), "task starts")
 check(run_task(), "task completes")
-eq(world.apply_calls, 1, "the game apply ran once")
+eq(world.apply_calls, 0, "no game method was called")
 local pouch = T.pouch_snapshot()
 eq(pouch[1], 5, "potion reached the set count")
 eq(pouch[2], 3, "whetfish reached the set count")
@@ -377,20 +373,14 @@ eq(T.hub_gate(), false, "a quest closes the gate")
 mm.playing = false
 eq(T.hub_gate(), true, "and it opens again once nothing is in flight")
 
--- 5f) an exact pass runs even when the pouch already matches, so the game can
--- trim extras, and it reports a check rather than a restock
+-- 5f) an already matching pouch starts nothing at all
 rebuild_world({ item_work(1, 5), item_work(2, 3), item_work(3, 2) },
     { item_work(1, 9) })
-world.apply_calls = 0
-world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
 T.state.task = nil
 T.state.pending_retry = nil
-check(T.start_task(link, "back in the hub", nil, true),
-    "an exact task is created even when nothing is planned")
-check(run_task(), "and it completes")
-check(world.apply_calls >= 1, "the game call was still made")
-check(T.state.last_result:find("checked") ~= nil,
-    "the result says the set was checked, not restocked")
+check(T.start_task(link, "back in the hub"), "an already-stocked task returns true")
+eq(T.state.task, nil, "no task is queued")
+check(T.state.last_result:find("already stocked") ~= nil, "and the panel says so")
 
 -- 6) candidate ranking puts the item-set apply first
 local cands = T.apply_candidates()
@@ -541,23 +531,6 @@ mm.gfm_loading = true                        -- loading into the hub
 for _ = 1, 150 do T.poll() end
 eq(T.state.hub_wait, 0, "the fallback clock stays at zero while loading")
 eq(T.state.hub_done_seq, 6, "and again nothing fired")
-
--- 15) a game call that throws is logged, skipped, and the top-up finishes
-mm.gfm_loading = false
-mm.result, mm.ending = false, false
-rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
-world.apply_calls = 0
-world.on_apply = function() error("boom from the game") end
-T.state.task = nil
-T.state.pending_retry = nil
-check(T.start_task(link, "back in the hub", nil, true),
-    "an exact hub task starts (game calls allowed)")
-check(run_task(), "it completes despite the throwing game call")
-check(world.apply_calls >= 2, "the other game call is still attempted")
-eq(T.pouch_snapshot()[1], 5, "the top-up did the work")
-check(T.state.last_result:find("restocked") ~= nil, "and the result says restocked")
-T.state.task = nil
-T.state.pending_retry = nil
 
 -- 16) trim: after a restock the pouch holds exactly the set, extras go back
 rebuild_world({ item_work(1, 5), item_work(2, 3), item_work(3, 2),
