@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.29"
+local VERSION = "0.1.30"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1503,6 +1503,48 @@ end
 -- is still the manual path, where the player is standing somewhere safe.
 -- The game throws when asked to apply an item-set slot it has no data for, so
 -- only arguments the game itself calls valid are ever tried.
+-- Move one pouch stack that the item set does not list back into the item box,
+-- using save-data writes only. The game's own apply needs a free slot when the
+-- set asks for a stack the pouch does not carry; a full pouch is the usual
+-- reason it raises. Returns the id moved, or nil and a reason.
+local function free_pouch_slot(index)
+    local contents = item_set_contents(index) or {}
+    local wanted = {}
+    for _, e in ipairs(contents) do wanted[e.id] = true end
+
+    local pick, pick_count, pick_work = nil, 0, nil
+    for _, w in ipairs(pouch_works()) do
+        local id = enum_number(field_value(w, "ItemIdFixed")) or 0
+        local n = enum_number(field_value(w, "Num")) or 0
+        if id ~= 0 and n > pick_count and not wanted[id] then
+            pick, pick_count, pick_work = id, n, w
+        end
+    end
+    if pick == nil then return nil, "every pouch stack is in the set" end
+
+    local target, empty = nil, nil
+    for _, w in ipairs(box_works()) do
+        local id = enum_number(field_value(w, "ItemIdFixed")) or 0
+        if id == pick then target = w end
+        if id == 0 and empty == nil then empty = w end
+    end
+    if target == nil and empty == nil then return nil, "no room in the item box" end
+
+    if not write_field(pick_work, "Num", 0) then return nil, "pouch write failed" end
+    if not write_field(pick_work, "ItemIdFixed", 0) then
+        write_field(pick_work, "Num", pick_count)
+        return nil, "pouch write failed"
+    end
+    if target ~= nil then
+        local have = enum_number(field_value(target, "Num")) or 0
+        write_field(target, "Num", have + pick_count)
+    else
+        write_field(empty, "ItemIdFixed", pick)
+        write_field(empty, "Num", pick_count)
+    end
+    return pick, pick_count
+end
+
 local function item_set_valid(arg)
     local m = static_method("app.ItemMySetUtil", "isValidData(System.Int32)")
     if m == nil then return nil end
@@ -1523,6 +1565,23 @@ local function strategies_for(link, index, auto, exact)
     local list = {}
     local set_obj = item_sets()[index]
     local may_call_game = (not auto) or exact
+
+    -- the game raises when the set asks for a stack the pouch cannot hold
+    local needs_stack = false
+    if may_call_game and (pouch_free_slots() or 0) <= 0 then
+        local pouch = pouch_snapshot()
+        for _, e in ipairs(item_set_contents(index) or {}) do
+            if ((pouch[e.id] or 0) == 0) and (e.count or 0) > 0 then
+                needs_stack = true break
+            end
+        end
+    end
+    if needs_stack then
+        list[#list + 1] = {
+            label = "free a pouch slot for the apply",
+            run = function() return free_pouch_slot(index) ~= nil end,
+        }
+    end
 
     -- the object form has no index to get wrong, so it goes first
     local apply_set = may_call_game and static_method("app.ItemMySetUtil",
@@ -2924,26 +2983,27 @@ local function draw_ui()
                 local apply = static_method("app.ItemMySetUtil",
                     "applyMySetToPouch(System.Int32)")
                 local parts = {}
-                for _, arg in ipairs({ idx - 1, idx, idx + 1 }) do
-                    local valid = item_set_valid(arg)
-                    local gname = tostring(game_set_name(arg) or "-")
-                    local sname = "-"
-                    local set = item_sets()[arg]
-                    if set ~= nil then
-                        sname = tostring(safe_str(field_value(set, "Name")) or "-")
-                    end
-                    local res = "not tried"
-                    if apply ~= nil and valid ~= false then
-                        local ok, err = pcall(function() apply:call(nil, arg) end)
-                        res = ok and "ok" or ("threw " .. tostring(err))
-                        if not ok then
-                            log.warn("[LinkedRestock] test apply("
-                                .. tostring(arg) .. ") threw: " .. tostring(err))
+                parts[#parts + 1] = "free=" .. tostring(pouch_free_slots())
+                if apply == nil then
+                    parts[#parts + 1] = "applyMySetToPouch missing"
+                else
+                    local arg = idx - 1
+                    local ok, err = pcall(function() apply:call(nil, arg) end)
+                    parts[#parts + 1] = string.format("apply(%d)=%s", arg,
+                        ok and "ok" or tostring(err))
+                    if not ok then
+                        local freed, why = free_pouch_slot(idx)
+                        parts[#parts + 1] = freed
+                            and ("freed " .. tostring(freed))
+                            or ("free failed: " .. tostring(why))
+                        if freed ~= nil then
+                            local ok2, err2 = pcall(function()
+                                apply:call(nil, arg)
+                            end)
+                            parts[#parts + 1] = "retry=" .. (ok2 and "ok"
+                                or tostring(err2))
                         end
                     end
-                    parts[#parts + 1] = string.format(
-                        "%d valid=%s game=%s save=%s -> %s", arg, tostring(valid),
-                        gname, sname, res)
                 end
                 notify("game apply: " .. table.concat(parts, " | "))
             end

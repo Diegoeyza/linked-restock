@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.30 — the right slot throws too, so the pouch gets room
+
+The improved test line settled the indexing question and killed the index theory:
+
+```
+3 valid=true  game=HH  save=LBG -> threw lua: error: Invoke threw an exception
+4 valid=false game=     save=HH  -> not tried
+5 valid=false game=     save=     -> not tried
+```
+
+`applyMySetToPouch(3)` **is** the HH set (the game's argument is 0-based: 3 = save
+slot 4 = HH), it is valid, and it still raises. So the game refuses the apply for
+a state reason — the set needs a stack the pouch does not carry while the pouch
+is full, and the game's own apply adds before it removes.
+
+- New `free_pouch_slot(index)`: moves the largest pouch stack that the set does
+  **not** list back into the item box using save-data writes only (existing box
+  stack first, then an empty box slot; never destroys the items).
+- The apply task now starts with that step when the pouch has no free slot and
+  the set needs a new stack, before `apply(set)`/`applyMySetToPouch`.
+- **Diagnostics → Test game apply** now reports the free slot count, applies,
+  and on a throw frees a slot and retries once, reporting both results — one
+  click confirms or kills the theory.
+
 ## 0.1.29 — one throwing call no longer hides the others
 
 0.1.25 skipped the remaining game calls of a task after the first one threw. The
