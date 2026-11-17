@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.32 — apply(set) works, and the pouch ends exactly as a manual apply
+
+The four-path test settled it:
+
+```
+free=2 | apply(set) ok(123->144) | applyMySetToPouch(3) ERR Invoke threw an exception(144->114)
+       | fillPouchItems ok(114->122) | free+apply ERR every pouch stack is in the set
+```
+
+- **`ItemMySetUtil.apply(cItemMySet)` works** — the object form, no index.
+- `applyMySetToPouch(int)` raises even with a valid, correctly-addressed slot, so
+  the mod no longer depends on it (it stays as a secondary path behind
+  `isValidData`).
+- `ItemUtil.fillPouchItems()` also works; the top-up remains the last resort.
+- `free=2` disproves the full-pouch theory: there were free slots, the apply was
+  refusing for its own reasons. The slot-freeing strategy is gone.
+
+**Exact semantics**, as requested: applying an item set in game leaves the pouch
+holding exactly that set — anything else, and any count above the set's, goes
+back to the item box. `trim_pouch(index)` now does that with save writes after
+the set is satisfied, so the result matches a manual apply instead of leaving
+extras. It uses `move_stack_to_box`, which raises an existing box stack or uses
+an empty slot and never destroys an item. The restock line reports
+`returned N stack(s) to the box`.
+
+The Diagnostics test now ends with a **trim extras to box** step.
+
 ## 0.1.30 — the right slot throws too, so the pouch gets room
 
 The improved test line settled the indexing question and killed the index theory:

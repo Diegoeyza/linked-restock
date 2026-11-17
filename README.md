@@ -108,7 +108,8 @@ loadout switch is visible without pressing anything or waiting for a trigger. If
 
 ## The two ways to apply an item set
 
-- **The game's own call** (`app.ItemMySetUtil.applyMySetToPouch`). It applies the
+- **The game's own call** (`app.ItemMySetUtil.apply(cItemMySet)`, and
+  `applyMySetToPouch(index)` behind it). It applies the
   item set exactly as the game would: the same items, counts and slot order, and
   it removes what the set does not contain. It is what **Apply now** and a link's
   **Apply** use. It must not be called while the game is tearing a quest down —
@@ -134,7 +135,9 @@ construction: the wait only counts while the game is out of a quest, retries
 require the same gate, and the task itself refuses to start if a quest is
 playing.
 
-Nothing is ever created: the item box is the hard limit in both paths.
+Either way the pouch ends up holding **exactly** the item set, the way a manual
+apply behaves: stacks that are not in the set, and any count above the set's, are
+returned to the item box. Nothing is ever created — the box is the hard limit.
 
 ## How it works
 

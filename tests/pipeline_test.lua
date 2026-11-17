@@ -555,5 +555,32 @@ check(T.state.last_result:find("restocked") ~= nil, "and the result says restock
 T.state.task = nil
 T.state.pending_retry = nil
 
+-- 16) trim: after a restock the pouch holds exactly the set, extras go back
+rebuild_world({ item_work(1, 5), item_work(2, 3), item_work(3, 2),
+                item_work(99, 4) },
+              { item_work(99, 1) })
+eq(T.trim_pouch(1), 1, "one stack that is not in the set is returned")
+local p16 = T.pouch_snapshot()
+eq(p16[99], nil, "it is out of the pouch")
+eq(T.box_snapshot()[99], 5, "and back in the existing box stack (1 + 4)")
+eq(p16[1], 5, "the set's own stacks are untouched")
+
+-- 17) a count above the set's is trimmed to the set's
+rebuild_world({ item_work(1, 9) }, { item_work(1, 1) })
+eq(T.trim_pouch(1), 1, "the excess is trimmed")
+eq(T.pouch_snapshot()[1], 5, "down to the set's count")
+eq(T.box_snapshot()[1], 5, "and the excess is in the box")
+
+-- 18) an empty box slot is used when the id is not in the box yet
+rebuild_world({ item_work(1, 5), item_work(99, 4) }, { item_work(0, 0) })
+eq(T.trim_pouch(1), 1, "the extra moved into an empty box slot")
+eq(T.box_snapshot()[99], 4, "with its whole count")
+
+-- 19) nothing to trim: the pouch already matches
+rebuild_world({ item_work(1, 5), item_work(2, 3), item_work(3, 2) },
+    { item_work(1, 9) })
+eq(T.trim_pouch(1), 0, "a matching pouch is left alone")
+eq(T.pouch_snapshot()[1], 5, "and its counts are unchanged")
+
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end

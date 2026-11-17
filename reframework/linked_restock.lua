@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.31"
+local VERSION = "0.1.32"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1503,46 +1503,61 @@ end
 -- is still the manual path, where the player is standing somewhere safe.
 -- The game throws when asked to apply an item-set slot it has no data for, so
 -- only arguments the game itself calls valid are ever tried.
--- Move one pouch stack that the item set does not list back into the item box,
--- using save-data writes only. The game's own apply needs a free slot when the
--- set asks for a stack the pouch does not carry; a full pouch is the usual
--- reason it raises. Returns the id moved, or nil and a reason.
-local function free_pouch_slot(index)
-    local contents = item_set_contents(index) or {}
-    local wanted = {}
-    for _, e in ipairs(contents) do wanted[e.id] = true end
+-- Put `count` of `id` from a pouch work back into the item box. Save-data only:
+-- an existing box stack is raised first, otherwise an empty box slot is used.
+-- Returns true when the move happened (the item is never destroyed).
+local function move_stack_to_box(work, id, count)
+    if work == nil or id == nil or id == 0 or (count or 0) <= 0 then return false end
+    local target, empty = nil, nil
+    for _, w in ipairs(box_works()) do
+        local bid = enum_number(field_value(w, "ItemIdFixed")) or 0
+        if bid == id then target = w end
+        if bid == 0 and empty == nil then empty = w end
+    end
+    if target == nil and empty == nil then return false end
 
-    local pick, pick_count, pick_work = nil, 0, nil
+    local have = enum_number(field_value(work, "Num")) or 0
+    local take = math.min(count, have)
+    if take <= 0 then return false end
+    if not write_field(work, "Num", have - take) then return false end
+    if have - take <= 0 then write_field(work, "ItemIdFixed", 0) end
+
+    if target ~= nil then
+        local n = enum_number(field_value(target, "Num")) or 0
+        write_field(target, "Num", n + take)
+    else
+        write_field(empty, "ItemIdFixed", id)
+        write_field(empty, "Num", take)
+    end
+    return true
+end
+
+-- Applying an item set in game leaves the pouch holding exactly that set: items
+-- that are not in it (and any count above the set's) go back to the item box.
+-- This is the same rule, done with save writes, so the result matches a manual
+-- apply instead of leaving extras behind.
+local function trim_pouch(index)
+    local contents = item_set_contents(index) or {}
+    local want = {}
+    for _, e in ipairs(contents) do want[e.id] = e.count or 0 end
+    local moved = 0
     for _, w in ipairs(pouch_works()) do
         local id = enum_number(field_value(w, "ItemIdFixed")) or 0
         local n = enum_number(field_value(w, "Num")) or 0
-        if id ~= 0 and n > pick_count and not wanted[id] then
-            pick, pick_count, pick_work = id, n, w
+        if id ~= 0 and n > 0 then
+            local target = want[id]
+            local extra
+            if target == nil then
+                extra = n
+            elseif n > target then
+                extra = n - target
+            end
+            if extra and extra > 0 and move_stack_to_box(w, id, extra) then
+                moved = moved + 1
+            end
         end
     end
-    if pick == nil then return nil, "every pouch stack is in the set" end
-
-    local target, empty = nil, nil
-    for _, w in ipairs(box_works()) do
-        local id = enum_number(field_value(w, "ItemIdFixed")) or 0
-        if id == pick then target = w end
-        if id == 0 and empty == nil then empty = w end
-    end
-    if target == nil and empty == nil then return nil, "no room in the item box" end
-
-    if not write_field(pick_work, "Num", 0) then return nil, "pouch write failed" end
-    if not write_field(pick_work, "ItemIdFixed", 0) then
-        write_field(pick_work, "Num", pick_count)
-        return nil, "pouch write failed"
-    end
-    if target ~= nil then
-        local have = enum_number(field_value(target, "Num")) or 0
-        write_field(target, "Num", have + pick_count)
-    else
-        write_field(empty, "ItemIdFixed", pick)
-        write_field(empty, "Num", pick_count)
-    end
-    return pick, pick_count
+    return moved
 end
 
 local function item_set_valid(arg)
@@ -1565,23 +1580,6 @@ local function strategies_for(link, index, auto, exact)
     local list = {}
     local set_obj = item_sets()[index]
     local may_call_game = (not auto) or exact
-
-    -- the game raises when the set asks for a stack the pouch cannot hold
-    local needs_stack = false
-    if may_call_game and (pouch_free_slots() or 0) <= 0 then
-        local pouch = pouch_snapshot()
-        for _, e in ipairs(item_set_contents(index) or {}) do
-            if ((pouch[e.id] or 0) == 0) and (e.count or 0) > 0 then
-                needs_stack = true break
-            end
-        end
-    end
-    if needs_stack then
-        list[#list + 1] = {
-            label = "free a pouch slot for the apply",
-            run = function() return free_pouch_slot(index) ~= nil end,
-        }
-    end
 
     -- the object form has no index to get wrong, so it goes first
     local apply_set = may_call_game and static_method("app.ItemMySetUtil",
@@ -1853,7 +1851,12 @@ local function tick_task()
         label = task.last_label or "?", left = #diff_now,
     }
     if #diff_now == 0 then
-        finish_task(true, nil)
+        -- the set is satisfied: finish like a manual apply by returning
+        -- everything the set does not list (and any excess) to the item box
+        local moved = 0
+        if task.mode == "exact" then moved = trim_pouch(task.index) end
+        finish_task(true, moved > 0
+            and ("returned " .. tostring(moved) .. " stack(s) to the box") or nil)
         return
     end
     task.diff = diff_now
@@ -3020,12 +3023,9 @@ local function draw_ui()
                     m:call(nil)
                 end)
 
-                step("free+apply", function()
-                    local freed, why = free_pouch_slot(idx)
-                    if freed == nil then error(tostring(why)) end
-                    local m = static_method("app.ItemMySetUtil",
-                        "applyMySetToPouch(System.Int32)")
-                    m:call(nil, idx - 1)
+                step("trim extras to box", function()
+                    local moved = trim_pouch(idx)
+                    if moved == 0 then error("nothing to trim") end
                 end)
 
                 local text = "game apply: " .. table.concat(parts, " | ")
@@ -3090,6 +3090,7 @@ LR._test = {
     labeled_dropdown = labeled_dropdown,
     hub_gate = hub_gate,
     hub_need_polls = hub_need_polls,
+    trim_pouch = trim_pouch,
     link_mismatch = link_mismatch,
     effective_key = effective_key,
     disable_conflicting = disable_conflicting,
