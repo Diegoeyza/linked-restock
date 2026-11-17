@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.27"
+local VERSION = "0.1.28"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1501,29 +1501,30 @@ end
 -- write save data only by default: invoking a game method while the game tears a
 -- quest down crashed the client at the end-of-quest screen. The game's own call
 -- is still the manual path, where the player is standing somewhere safe.
+-- The game throws when asked to apply an item-set slot it has no data for, so
+-- only arguments the game itself calls valid are ever tried.
+local function item_set_valid(arg)
+    local m = static_method("app.ItemMySetUtil", "isValidData(System.Int32)")
+    if m == nil then return nil end
+    local v = safe(function() return m:call(nil, arg) end)
+    if v == nil then return nil end
+    return v == true
+end
+
+local function game_set_name(arg)
+    local m = static_method("app.ItemMySetUtil", "getItemMySetData(System.Int32)")
+    if m == nil then return nil end
+    local set = safe(function() return m:call(nil, arg) end)
+    if set == nil then return nil end
+    return safe_str(field_value(set, "Name"))
+end
+
 local function strategies_for(link, index, auto, exact)
     local list = {}
     local set_obj = item_sets()[index]
     local may_call_game = (not auto) or exact
 
-    local apply_pouch = may_call_game and static_method("app.ItemMySetUtil",
-        "applyMySetToPouch(System.Int32)")
-    if apply_pouch ~= nil then
-        for _, base in ipairs({ index - 1, index }) do
-            list[#list + 1] = {
-                label = "ItemMySetUtil.applyMySetToPouch(" .. tostring(base) .. ")",
-                game = true,
-                run = function()
-                    local m = static_method("app.ItemMySetUtil",
-                        "applyMySetToPouch(System.Int32)")
-                    if m == nil then error("applyMySetToPouch is not available") end
-                    m:call(nil, base)
-                    return true
-                end,
-            }
-        end
-    end
-
+    -- the object form has no index to get wrong, so it goes first
     local apply_set = may_call_game and static_method("app.ItemMySetUtil",
         "apply(app.savedata.cItemMySet)")
     if apply_set ~= nil and set_obj ~= nil then
@@ -1535,11 +1536,35 @@ local function strategies_for(link, index, auto, exact)
                     "apply(app.savedata.cItemMySet)")
                 if m == nil then error("apply(cItemMySet) is not available") end
                 local set = item_sets()[index]
-                if set == nil then error("item set " .. tostring(index) .. " is gone") end
+                if set == nil then
+                    error("item set " .. tostring(index) .. " is gone")
+                end
                 m:call(nil, set)
                 return true
             end,
         }
+    end
+
+    local apply_pouch = may_call_game and static_method("app.ItemMySetUtil",
+        "applyMySetToPouch(System.Int32)")
+    if apply_pouch ~= nil then
+        for _, base in ipairs({ index - 1, index }) do
+            if item_set_valid(base) ~= false then
+                list[#list + 1] = {
+                    label = "ItemMySetUtil.applyMySetToPouch(" .. tostring(base) .. ")",
+                    game = true,
+                    run = function()
+                        local m = static_method("app.ItemMySetUtil",
+                            "applyMySetToPouch(System.Int32)")
+                        if m == nil then
+                            error("applyMySetToPouch is not available")
+                        end
+                        m:call(nil, base)
+                        return true
+                    end,
+                }
+            end
+        end
     end
 
     list[#list + 1] = {
@@ -2894,25 +2919,31 @@ local function draw_ui()
             if idx == nil then
                 notify("no link or default item set to test")
             else
-                local typed = safe(sdk.find_type_definition, "app.ItemMySetUtil")
-                local m = typed and safe(function()
-                    return typed:get_method("applyMySetToPouch(System.Int32)")
-                end)
-                if m == nil then
-                    notify("applyMySetToPouch is not available")
-                else
-                    local parts = {}
-                    for _, base in ipairs({ idx - 1, idx }) do
-                        local ok, err = pcall(function() m:call(nil, base) end)
-                        parts[#parts + 1] = string.format("%d: %s", base,
-                            ok and "ok" or ("threw " .. tostring(err)))
+                local apply = static_method("app.ItemMySetUtil",
+                    "applyMySetToPouch(System.Int32)")
+                local parts = {}
+                for _, arg in ipairs({ idx - 1, idx, idx + 1 }) do
+                    local valid = item_set_valid(arg)
+                    local gname = tostring(game_set_name(arg) or "-")
+                    local sname = "-"
+                    local set = item_sets()[arg]
+                    if set ~= nil then
+                        sname = tostring(safe_str(field_value(set, "Name")) or "-")
+                    end
+                    local res = "not tried"
+                    if apply ~= nil and valid ~= false then
+                        local ok, err = pcall(function() apply:call(nil, arg) end)
+                        res = ok and "ok" or ("threw " .. tostring(err))
                         if not ok then
-                            log.warn("[LinkedRestock] test apply(" .. tostring(base)
-                                .. ") threw: " .. tostring(err))
+                            log.warn("[LinkedRestock] test apply("
+                                .. tostring(arg) .. ") threw: " .. tostring(err))
                         end
                     end
-                    notify("game apply " .. table.concat(parts, " | "))
+                    parts[#parts + 1] = string.format(
+                        "%d valid=%s game=%s save=%s -> %s", arg, tostring(valid),
+                        gname, sname, res)
                 end
+                notify("game apply: " .. table.concat(parts, " | "))
             end
         end
         if imgui.button("Dump flow API##dump_api") then

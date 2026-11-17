@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.28 — the game rejects empty item-set slots, and says so
+
+The one-click test answered the question in a single line:
+
+```
+test apply(3) threw: lua: error: Invoke threw an exception
+game apply 3: threw ... | 4: ok
+```
+
+So `applyMySetToPouch` **validates its argument**: asked for a slot with no item
+data it raises a managed exception, which the mod was treating as "the apply
+does not work at all" and retrying three times.
+
+- The object form `apply(cItemMySet)` is now tried **first**: it takes the set
+  itself, so there is no index to get wrong.
+- The index form only runs for arguments the game reports as valid
+  (`ItemMySetUtil.isValidData`), so an empty neighbouring slot can no longer throw.
+- The Diagnostics test now prints, for `idx-1`, `idx` and `idx+1`: whether the
+  game considers it valid, the name the **game** gives that slot, the name the
+  **save array** has at the same position, and the apply result. That settles the
+  0-based/1-based mapping instead of guessing.
+
 ## 0.1.27 — a one-click game-apply test, so the failing call can speak
 
 Every previous "restock failed" left one question open: what did the game's own
