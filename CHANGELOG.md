@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.41 — the game's own camp gate, and whether the pouch is the array we write
+
+The item API dump (0.1.39) turned out to be the useful part. `app.ItemUtil` has:
+
+- `canSetupCamp()` and `canSetupCampForItem()` → `app.ItemUtil.SETUP_CAMP_STATE`,
+  the game's own "can a camp be set up / used right now" answer,
+- `getItemNum(ItemDef.ID, STOCK_TYPE)`, `getItemWork(...)`, `getItemPouch(index)`,
+- `changeItemNum(ItemDef.ID, Int16, STOCK_TYPE)`, `fillPouchItem(ID, num)`,
+  `fillPouchItems()` — the functions normal play uses when items move,
+- `getFillMaxNum`, `getItemCapacity`, `hasItem`.
+
+New in this build:
+
+- every trigger logs `camp canSetupCamp=N canSetupCampForItem=N`, and the flow
+  line carries both values, so the numbers can be learned from play (hub, camp,
+  field, quest) instead of guessed,
+- after a restock the log compares the pouch with `ItemUtil.getItemPouch(index)`
+  in both index bases (`ptr0`, `ptr1`, `idmatch0`, `idmatch1`). If the pointers
+  differ and the ids do too, the game keeps a separate runtime pouch and the
+  save-data writes are invisible until it re-reads — which is exactly the
+  question 0.1.39's `recheck` left open,
+- the API dump now also covers `app.EnvironmentManager`, `app.cCampManager`,
+  `app.MissionManager`, `app.GameFlowManager` and `app.PlayerManager`, for the
+  zone/area/environment getters an auto-buffer style gate would need.
+
 ## 0.1.40 — the game's apply does not exist in the file any more
 
 0.1.35 stopped using it; this removes the machinery itself, so no future edit can

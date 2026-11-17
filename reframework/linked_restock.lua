@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.40"
+local VERSION = "0.1.41"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -510,6 +510,30 @@ end
 
 local function box_snapshot()
     return snapshot(box_works(), "ItemIdFixed", "Num")
+end
+
+-- Static game calls with zero or one int argument, so no vararg ever reaches a
+-- nested closure (that does not compile on this LuaJIT).
+local function static_zero(type_name, signature)
+    local td = safe(sdk.find_type_definition, type_name)
+    local m = td and safe(function() return td:get_method(signature) end)
+    if m == nil then return nil end
+    return safe(function() return m:call(nil) end)
+end
+
+local function static_int(type_name, signature, arg)
+    local td = safe(sdk.find_type_definition, type_name)
+    local m = td and safe(function() return td:get_method(signature) end)
+    if m == nil then return nil end
+    return safe(function() return m:call(nil, arg) end)
+end
+
+-- app.ItemUtil.canSetupCamp(): the game's own answer to "can this camp be set
+-- up right now". The numbers still have to be learned from a live run; 0 is
+-- assumed to mean "yes" and is logged next to every trigger.
+local function camp_state()
+    return enum_number(static_zero("app.ItemUtil", "canSetupCamp()")),
+           enum_number(static_zero("app.ItemUtil", "canSetupCampForItem()"))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1693,6 +1717,34 @@ local function finish_task(ok, detail)
         local line = "pouch after " .. label .. ": " .. table.concat(bits, " ")
         log.info("[LinkedRestock] " .. line)
         trace(line)
+        -- Does the pouch the game plays with come from this same array? Compare
+        -- a few slots with ItemUtil.getItemPouch(index), in both index bases.
+        local works = pouch_works()
+        if #works > 0 then
+            local save0 = tostring(works[1])
+            local p0 = static_int("app.ItemUtil", "getItemPouch(System.Int32)", 0)
+            local p1 = static_int("app.ItemUtil", "getItemPouch(System.Int32)", 1)
+            local function id_matches(base)
+                local n = 0
+                local upto = math.min(8, #works)
+                for i = 1, upto do
+                    local lw = static_int("app.ItemUtil", "getItemPouch(System.Int32)",
+                        i - 1 + base)
+                    local sid = tonumber(field_value(works[i], "ItemIdFixed")) or 0
+                    local lid = lw and (tonumber(field_value(lw, "ItemIdFixed")) or 0) or -1
+                    if sid == lid then n = n + 1 end
+                end
+                return n, upto
+            end
+            local n0, upto = id_matches(0)
+            local n1 = id_matches(1)
+            local l = "live pouch identity: ptr0=" .. tostring(p0 ~= nil and tostring(p0) == save0)
+                .. " ptr1=" .. tostring(p1 ~= nil and tostring(p1) == save0)
+                .. " idmatch0=" .. n0 .. "/" .. upto
+                .. " idmatch1=" .. n1 .. "/" .. upto
+            log.info("[LinkedRestock] " .. l)
+            trace(l)
+        end
         -- five seconds later, confirm the game did not rewrite the pouch from its
         -- own runtime copy: the writes can verify now and be gone by the time
         -- the item screen is opened
@@ -1845,6 +1897,8 @@ local api_dumped = false
 local ITEM_API_TYPES = {
     "app.ItemUtil", "app.ItemMySetUtil", "app.ItemPouchUtil", "app.ItemManager",
     "app.savedata.cItemParam", "app.cItemParam", "app.cItemWork",
+    "app.EnvironmentManager", "app.cCampManager", "app.MissionManager",
+    "app.GameFlowManager", "app.PlayerManager",
 }
 
 local function dump_item_api(why)
@@ -1957,11 +2011,12 @@ local function flow_trace(q)
     local ending = mm and call_method(mm, "get_IsQuestEndShowing")
     local gfm = safe(function() return sdk.get_managed_singleton("app.GameFlowManager") end)
     local loading = gfm and call_method(gfm, "get_Loading")
+    local camp, camp_item = camp_state()
     local tuple = string.format(
-        "playing=%s active=%s questdata=%s director=%s result=%s ending=%s loading=%s",
+        "playing=%s active=%s questdata=%s director=%s result=%s ending=%s loading=%s camp=%s campitem=%s",
         tostring(q), tostring(active), aqd ~= nil and "yes" or "no",
         director ~= nil and "yes" or "no", tostring(result), tostring(ending),
-        tostring(loading))
+        tostring(loading), tostring(camp), tostring(camp_item))
     if tuple ~= last_flow_trace then
         last_flow_trace = tuple
         log.info("[LinkedRestock] flow " .. tuple)
@@ -2003,6 +2058,9 @@ local function fire(reason)
     local link, mode, why = resolve_link(sig, config.links, config)
     log.info("[LinkedRestock] build " .. describe_build(sig))
     trace("build " .. describe_build(sig))
+    local camp, camp_item = camp_state()
+    log.info("[LinkedRestock] camp canSetupCamp=" .. tostring(camp)
+        .. " canSetupCampForItem=" .. tostring(camp_item))
     if link ~= nil then
         log.info("[LinkedRestock] match '" .. tostring(link.label) .. "' ("
             .. tostring(why) .. ")")
