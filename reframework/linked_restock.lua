@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.42"
+local VERSION = "0.1.43"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -288,6 +288,57 @@ local function call_method(obj, name)
     local m = td and safe(function() return td:get_method(name) end)
     if not m then return nil end
     return safe(function() return m:call(obj) end)
+end
+
+local function call_named(obj, name)
+    local v = call_method(obj, name)
+    if v ~= nil then return v end
+    return call_method(obj, name .. "()")
+end
+
+-- app.cCampManager is not a managed singleton, so the instance has to be found.
+-- checkIsInTent() / get_InZoneGimmick() are the game's own "is the player in the
+-- tent / in a camp zone" answers.
+local camp_mgr_cache = nil
+local camp_mgr_at = -100000
+local camp_mgr_found_by = nil
+
+local function camp_manager()
+    if camp_mgr_cache ~= nil then return camp_mgr_cache end
+    -- `state` is declared further down; a wall clock is enough for a retry
+    -- cooldown and avoids the ordering trap
+    local now = os.time()
+    if now - camp_mgr_at < 5 then return nil end
+    camp_mgr_at = now
+    local tries = {
+        function() return sdk.get_managed_singleton("app.cCampManager") end,
+        function()
+            return sdk.get_native_singleton
+                and sdk.get_native_singleton("app.cCampManager")
+        end,
+        function() return sdk.get_managed_singleton("app.CampManager") end,
+    }
+    for i, fn in ipairs(tries) do
+        local obj = safe(fn)
+        if obj ~= nil then
+            camp_mgr_cache = obj
+            camp_mgr_found_by = i
+            log.info("[LinkedRestock] camp manager instance via strategy " .. i)
+            return obj
+        end
+    end
+    return nil
+end
+
+local function camp_live()
+    local cm = camp_manager()
+    if cm == nil then return nil, "no instance" end
+    local tent = call_named(cm, "checkIsInTent")
+    local zone = call_named(cm, "get_InZoneGimmick")
+    local enable = call_named(cm, "get_IsInEnableSetZone")
+    if tent == nil and zone == nil and enable == nil then return nil, "no getters" end
+    return string.format("tent=%s zone=%s enable=%s",
+        tostring(tent), tostring(zone ~= nil), tostring(enable)), nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -1917,7 +1968,10 @@ local ITEM_API_TYPES = {
     "app.ItemUtil", "app.ItemMySetUtil", "app.ItemPouchUtil", "app.ItemManager",
     "app.savedata.cItemParam", "app.cItemParam", "app.cItemWork",
     "app.EnvironmentManager", "app.cCampManager", "app.MissionManager",
-    "app.GameFlowManager", "app.PlayerManager",
+    "app.GameFlowManager", "app.PlayerManager", "app.GimmickManager",
+    "app.Gm800", "app.Gm100_000", "app.MiniCampCameraController",
+    "app.cGimmickMiniComponentManager", "app.cFieldSceneParam",
+    "app.cGUICommonMenu_Camp", "app.cGUICampViewData",
 }
 
 local function dump_item_api(why)
@@ -2031,11 +2085,15 @@ local function flow_trace(q)
     local gfm = safe(function() return sdk.get_managed_singleton("app.GameFlowManager") end)
     local loading = gfm and call_method(gfm, "get_Loading")
     local camp, camp_item = camp_state()
+    local scene = enum_number(call_method(gfm, "get_CurrentGameScene"))
+    local stage = enum_number(call_method(mm, "getActiveStageType"))
+    local live, live_why = camp_live()
     local tuple = string.format(
-        "playing=%s active=%s questdata=%s director=%s result=%s ending=%s loading=%s camp=%s campitem=%s",
+        "playing=%s active=%s questdata=%s director=%s result=%s ending=%s loading=%s camp=%s campitem=%s scene=%s stage=%s %s",
         tostring(q), tostring(active), aqd ~= nil and "yes" or "no",
         director ~= nil and "yes" or "no", tostring(result), tostring(ending),
-        tostring(loading), tostring(camp), tostring(camp_item))
+        tostring(loading), tostring(camp), tostring(camp_item),
+        tostring(scene), tostring(stage), tostring(live or live_why or "-"))
     if tuple ~= last_flow_trace then
         last_flow_trace = tuple
         log.info("[LinkedRestock] flow " .. tuple)

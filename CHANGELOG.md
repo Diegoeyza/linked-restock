@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.43 — the game's tent/camp state, found the hard way
+
+`canSetupCamp()` turned out to be a poor camp signal: it flips `0 ↔ 4` every few
+seconds while standing in a camp (18:53 log), so it is about the *set-up-camp*
+prompt, not about being at a camp. `canSetupCampForItem()` stayed 0 throughout.
+
+The item API dump found the real thing: **`app.cCampManager`**, with
+
+- `checkIsInTent() -> Boolean` — the player is inside a tent
+- `get_InZoneGimmick() -> app.Gm800` — the camp gimmick of the current zone
+- `get_InZoneGmID()`, `get_IsInEnableSetZone()`, `isPlayerGetInSimpleCampTent()`
+- `getTentPosInZone()`, `getNearTent(vec3)`, `get_PlayerGetInTentGimmick()`
+
+It is **not** a managed singleton, so this build finds the instance with three
+strategies (`managed_singleton`, `native_singleton`, name variant), logs which one
+worked, and retries every 5 s if none did.
+
+The flow line now carries `scene=` (`GameFlowManager.get_CurrentGameScene`),
+`stage=` (`MissionManager.getActiveStageType`) and `tent=… zone=… enable=…` from
+the camp manager — a camp/zone gate for a future build, measured before it is
+enforced.
+
+Types added to the API dump: `app.GimmickManager`, `app.Gm800`, `app.Gm100_000`,
+`app.MiniCampCameraController`, `app.cGimmickMiniComponentManager`,
+`app.cFieldSceneParam`, `app.cGUICommonMenu_Camp`, `app.cGUICampViewData`.
+
 ## 0.1.42 — the trace file actually opens (or says why not)
 
 The crash trace had never been exercised: no `linked_restock_trace.log` exists
