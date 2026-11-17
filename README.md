@@ -106,38 +106,28 @@ The panel is live: it re-reads the worn gear twice a second and prints
 loadout switch is visible without pressing anything or waiting for a trigger. If it says
 "not read yet" nothing has been equipped/loaded yet; press *Refresh*.
 
-## The two ways to apply an item set
+## How a restock is applied
 
-- **The game's own call** (`app.ItemMySetUtil.apply(cItemMySet)`, and
-  `applyMySetToPouch(index)` behind it). It applies the
-  item set exactly as the game would: the same items, counts and slot order, and
-  it removes what the set does not contain. It is what **Apply now** and a link's
-  **Apply** use. It must not be called while the game is tearing a quest down —
-  that crashed the client — so it is never used by the automatic triggers unless
-  you tick **Game call on automatic restock**.
-- **A save-data top-up.** The mod raises pouch counts and fills empty slots from
-  the item box, and never calls into the game. It reaches the same item counts,
-  but leaves items in the pouch that the set does not list, and cannot reorder
-  slots. The automatic triggers do this first, immediately, so the pouch is never
-  left short.
+The mod never calls into the game. Invoking the game's own item-set apply from a
+script threw on empty sets and crashed the client twice *after* returning "ok"
+(an access violation about a second later), so the restock is done with save-data
+writes:
 
-The automatic trigger waits until the mod can see the quest is completely over
-and the hub is loaded — `get_IsQuestResult` and `get_IsQuestEndShowing` false,
+1. stacks that are **not** in the item set, and any count above the set's, go back
+   to the item box (which also frees pouch slots),
+2. the pouch is topped up from the item box,
+3. the result is verified by re-reading the pouch, and logged.
+
+The pouch ends up holding **exactly** the item set, the way a manual apply
+behaves. Nothing is ever created: the item box is the hard limit. The only
+difference from the game's menu apply is slot order.
+
+The automatic trigger waits until the mod can see the quest is over and the hub is
+loaded — `get_IsQuestResult` and `get_IsQuestEndShowing` false,
 `app.GameFlowManager.get_Loading` false, no active quest, readable item data —
-held for ~3 s. It then runs one task that tries the game's own call first and
-falls back to the top-up. There is no switch for it: this is always what happens.
-The `Quest:` line names the blocking condition while it waits
-(`in the hub - waiting (results screen)`) and counts up when it is free. If the gate never opens for a minute **while the hub is genuinely loaded** (a
-getter misbehaving), the mod tops up without touching game code rather than
-leaving the pouch short; the clock does not run on the results or loading
-screens. The hub restock is impossible mid-quest by
-construction: the wait only counts while the game is out of a quest, retries
-require the same gate, and the task itself refuses to start if a quest is
-playing.
-
-Either way the pouch ends up holding **exactly** the item set, the way a manual
-apply behaves: stacks that are not in the set, and any count above the set's, are
-returned to the item box. Nothing is ever created — the box is the hard limit.
+held for ~3 s. **Apply now** runs exactly the same path, with the same retries;
+a retry waits for the same settled hub. There is no switch for any of it.
+When no link matches, the weapon-type fallback runs, then the default item set.
 
 ## How it works
 
@@ -151,18 +141,17 @@ returned to the item box. Nothing is ever created — the box is the hard limit.
 - **Item loadouts** are read from the save data
   (`_ItemMySet._Data[]._PouchItem[]`, `ItemIdFixed` + `Num`), with names from the
   game's own item table.
-- **Applying** calls `app.ItemMySetUtil.applyMySetToPouch(index)` (or
-  `apply(set)`), verifies the pouch afterwards, and falls back to topping the
-  pouch up from the item box.
+- **Applying** returns the non-set stacks to the item box and tops the pouch up
+  from it, then verifies by re-reading the pouch. No game method is called.
 - **Triggers** poll `app.MissionManager:get_IsPlayingQuest()` twice a second. No
   hooks.
 
 ## Limits
 
-- Applying an item set outside the item box depends on a game method whose exact
-  name/signature is confirmed by the probe. Until then the pouch top-up path is
-  what runs, and it handles everything except *removing* items the set does not
-  list (the "exact set" behaviour of the in-game box).
+- Slot order is not written: the contents are exact, the arrangement is the
+  game's. Stack order inside the pouch is unaffected.
+- Field items (things you pick up in a hunt and cannot box) are not restockable;
+  the mod reports them as missing instead of inventing them.
 - A hand-edited build (pieces changed without re-saving a loadout) may not match
   a saved loadout's link under the strict modes; use a looser mode or re-link.
 - The mod never writes the item box beyond what the pouch takes, never touches
