@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.46 — the camp manager has a proper owner, and the pouch question is answered
+
+**Camp manager.** `sdk.get_native_singleton("app.cCampManager")` did return
+something (strategy 2), but every method call on it came back nil — the flow line
+said `no getters` for a whole session. The API dump has the clean route:
+
+```
+app.GimmickManager.get_CampManager() -> app.cCampManager     (GimmickManager IS a singleton)
+```
+
+That is tried first now, with the managed-singleton and native-singleton routes
+kept as fallbacks, and the resolved type name logged once.
+
+**The pouch is the array we write.** From the 19:38 restock:
+
+```
+pouch after HH: 125:10 152:1 … 8:7
+live pouch identity: ptr0=true ptr1=false idmatch0=8/8 idmatch1=0/8
+recheck HH +5s: still stocked
+```
+
+`app.ItemUtil.getItemPouch(index)` returns the **same object pointer** as
+`_PouchItem[1]`, and the ids match 8/8 with 0-based indexing (0/8 with 1-based).
+There is no separate runtime pouch: the save-data array is the live pouch, and
+the writes are effective. The item-screen doubt is closed.
+
 ## 0.1.45 — the hub restock checks the hub, and the reason is readable
 
 The gate now asks the game whether the player is actually at a camp, instead of

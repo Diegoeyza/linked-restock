@@ -635,3 +635,94 @@
 2026-11-17 19:05:41 live pouch identity: ptr0=false ptr1=false idmatch0=0/6 idmatch1=0/6
 2026-11-17 19:05:41 build armour[armor:168:2 armor:196:3 armor:198:4 armor:39:0 armor:39:1] charm=charm:192 weapon[weapon:3:900 weapon:6:85]
 2026-11-17 19:05:41 nomatch Guardian Arkveld differs: skills (jewels), charm
+2026-11-17 19:42:50 trace opened at linked_restock_trace.log (v0.1.46)
+2026-11-17 19:42:50 task start set=1 diff=3 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=3
+2026-11-17 19:42:50 verify left=3 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=3
+2026-11-17 19:42:50 topup id=1 have=1 to=5 add=4
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Rompo LBG: 1:5 2:3 3:2
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/8 idmatch1=0/8
+2026-11-17 19:42:50 task start set=1 diff=2 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=2
+2026-11-17 19:42:50 verify left=2 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=2
+2026-11-17 19:42:50 topup id=1 have=1 to=4 add=3
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Rompo LBG: 1:4 2:1
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/8 idmatch1=0/8
+2026-11-17 19:42:50 task start set=1 diff=1 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=1
+2026-11-17 19:42:50 verify left=1 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=1
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Rompo LBG: 1:2
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/8 idmatch1=0/8
+2026-11-17 19:42:50 task start set=1 diff=0 mode=exact
+2026-11-17 19:42:50 task start set=1 diff=1 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=1
+2026-11-17 19:42:50 verify left=1 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=1
+2026-11-17 19:42:50 topup id=1 have=1 to=5 add=4
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Rompo LBG: 1:5
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/8 idmatch1=0/8
+2026-11-17 19:42:50 task start set=1 diff=0 mode=exact
+2026-11-17 19:42:50 recheck Rompo LBG +5s: 1 item(s) changed back
+2026-11-17 19:42:50 task start set=1 diff=1 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=1
+2026-11-17 19:42:50 trim id=99 n=4
+2026-11-17 19:42:50 trim id=1 n=4
+2026-11-17 19:42:50 trim id=99 n=4
+2026-11-17 19:42:50 task start set=1 diff=3 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=3
+2026-11-17 19:42:50 trim id=99 n=4
+2026-11-17 19:42:50 verify left=3 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=3
+2026-11-17 19:42:50 topup id=1 have=2 to=5 add=3
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Rompo LBG: 1:5 2:3 3:2
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/8 idmatch1=0/8
+2026-11-17 19:42:50 trace opened at linked_restock_trace.log (v0.1.46)
+2026-11-17 19:42:50 build armour[armor:168:2 armor:196:3 armor:198:4 armor:39:0 armor:39:1] charm=charm:192 weapon[weapon:3:441 weapon:6:85]
+2026-11-17 19:42:50 fire test -> Guardian Arkveld set=1
+2026-11-17 19:42:50 task start set=1 diff=2 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=2
+2026-11-17 19:42:50 verify left=2 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=2
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Base: 1:10 2:3
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/6 idmatch1=0/6
+2026-11-17 19:42:50 build armour[armor:168:2 armor:196:3 armor:198:4 armor:39:0 armor:39:1] charm=charm:192 weapon[weapon:3:900 weapon:6:85]
+2026-11-17 19:42:50 nomatch Guardian Arkveld differs: weapon
+2026-11-17 19:42:50 build armour[armor:168:2 armor:196:3 armor:198:4 armor:39:0 armor:39:1] charm=charm:192 weapon[weapon:3:900 weapon:6:85]
+2026-11-17 19:42:50 fire test -> Guardian Arkveld set=1
+2026-11-17 19:42:50 task start set=1 diff=2 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=2
+2026-11-17 19:42:50 verify left=2 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=2
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Base: 1:10 2:3
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/6 idmatch1=0/6
+2026-11-17 19:42:50 build armour[armor:168:2 armor:196:3 armor:198:4 armor:39:0 armor:39:1] charm=charm:192 weapon[weapon:3:900 weapon:6:85]
+2026-11-17 19:42:50 nomatch Guardian Arkveld differs: skills (jewels)
+2026-11-17 19:42:50 build armour[armor:168:2 armor:196:3 armor:198:4 armor:39:0 armor:39:1] charm=charm:192 weapon[weapon:3:900 weapon:6:85]
+2026-11-17 19:42:50 fire test -> Guardian Arkveld set=1
+2026-11-17 19:42:50 task start set=1 diff=2 mode=exact
+2026-11-17 19:42:50 run return extras to the item box diff=2
+2026-11-17 19:42:50 verify left=2 after return extras to the item box
+2026-11-17 19:42:50 run top-up from the item box diff=2
+2026-11-17 19:42:50 verify left=0 after top-up from the item box
+2026-11-17 19:42:50 finish ok=true 
+2026-11-17 19:42:50 pouch after Base: 1:10 2:3
+2026-11-17 19:42:50 live pouch identity: ptr0=false ptr1=false idmatch0=0/6 idmatch1=0/6
+2026-11-17 19:42:50 build armour[armor:168:2 armor:196:3 armor:198:4 armor:39:0 armor:39:1] charm=charm:192 weapon[weapon:3:900 weapon:6:85]
+2026-11-17 19:42:50 nomatch Guardian Arkveld differs: skills (jewels), charm

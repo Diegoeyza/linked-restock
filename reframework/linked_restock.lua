@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.45"
+local VERSION = "0.1.46"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -310,47 +310,41 @@ local function camp_manager()
     local now = os.time()
     if now - camp_mgr_at < 5 then return nil end
     camp_mgr_at = now
-    local tries = {
-        function() return sdk.get_managed_singleton("app.cCampManager") end,
-        function()
+    local found, how = nil, nil
+    -- the managed route: app.GimmickManager owns the camp manager
+    local gm = safe(function()
+        return sdk.get_managed_singleton("app.GimmickManager")
+    end)
+    if gm ~= nil then
+        local cm = call_named(gm, "get_CampManager")
+        if cm ~= nil then found, how = cm, "GimmickManager.get_CampManager" end
+    end
+    if found == nil then
+        local cm = safe(function()
+            return sdk.get_managed_singleton("app.cCampManager")
+        end)
+        if cm ~= nil then found, how = cm, "managed_singleton" end
+    end
+    if found == nil then
+        -- the native singleton was found before, but its methods did not answer;
+        -- kept last on purpose
+        local cm = safe(function()
             return sdk.get_native_singleton
                 and sdk.get_native_singleton("app.cCampManager")
-        end,
-        function() return sdk.get_managed_singleton("app.CampManager") end,
-    }
-    for i, fn in ipairs(tries) do
-        local obj = safe(fn)
-        if obj ~= nil then
-            camp_mgr_cache = obj
-            camp_mgr_found_by = i
-            log.info("[LinkedRestock] camp manager instance via strategy " .. i)
-            return obj
-        end
+        end)
+        if cm ~= nil then found, how = cm, "native_singleton" end
+    end
+    if found ~= nil then
+        local td = safe(function() return found:get_type_definition() end)
+        local tn = td and safe(function() return td:get_full_name() end) or "?"
+        camp_mgr_cache = found
+        log.info("[LinkedRestock] camp manager via " .. tostring(how)
+            .. " (" .. tostring(tn) .. ")")
+        return found
     end
     return nil
 end
 
--- "Name(3)" for an enum value when the game will stringify it, plain number
--- otherwise. Splitting hub from field by a name beats remembering a magic int.
-local function enum_label(v)
-    if v == nil then return nil end
-    local n = enum_number(v)
-    local text = safe(function() return v:call("ToString") end)
-    if type(text) ~= "string" or text == "" then
-        text = safe(function() return v:call("ToString()") end)
-    end
-    if type(text) == "string" and text ~= "" and text ~= tostring(n) then
-        return text .. "(" .. tostring(n) .. ")"
-    end
-    return tostring(n)
-end
-
--- Set once the game has shown us a camp zone: from that point on a hub restock
--- waits for it, instead of trusting "out of quest + loaded" alone.
-local camp_seen = false
-
--- Is the player at a camp / the hub? The game's own answer, from cCampManager.
--- Returns nil when the instance could not be found, so the caller can fall back.
 local function hub_camp_state()
     local cm = camp_manager()
     if cm == nil then return nil, "camp state unavailable" end
