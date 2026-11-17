@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.39"
+local VERSION = "0.1.40"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1240,85 +1240,6 @@ local function method_is_static(m)
     return safe(function() return m:is_static() end) == true
 end
 
-local function apply_candidates()
-    if apply_candidates_cache ~= nil then return apply_candidates_cache end
-    local out = {}
-    local type_names = { "app.ItemMySetUtil", "app.ItemPouchUtil", "app.ItemUtil" }
-    local verbs = { "apply", "load", "restock", "refill", "change", "call", "use", "set" }
-
-    -- Score names so the most plausible call runs first: an explicit item
-    -- my-set apply beats a generic pouch helper, which beats anything else.
-    local function score(low)
-        local has_verb = false
-        for _, v in ipairs(verbs) do
-            if string.find(low, v, 1, true) then has_verb = true break end
-        end
-        if not has_verb then return 0 end
-        if string.find(low, "myset", 1, true) then return 3 end
-        if string.find(low, "itemset", 1, true) then return 3 end
-        if string.find(low, "item", 1, true) then return 2 end
-        if string.find(low, "pouch", 1, true) then return 1 end
-        return 0
-    end
-
-    for _, tn in ipairs(type_names) do
-        local td = safe(sdk.find_type_definition, tn)
-        if td then
-            for _, m in ipairs(safe(function() return td:get_methods() end) or {}) do
-                local name = safe(function() return m:get_name() end) or ""
-                local low = string.lower(name)
-                local params = method_param_count(m)
-                local first3 = string.sub(low, 1, 3)
-                local s = score(low)
-                if s > 0
-                    and first3 ~= "get" and first3 ~= "is_" and first3 ~= "has"
-                    and (params == 1 or params == 2) then
-                    out[#out + 1] = {
-                        type = tn, name = name, params = params,
-                        static = method_is_static(m), score = s,
-                    }
-                end
-            end
-        end
-    end
-    table.sort(out, function(a, b)
-        if a.score ~= b.score then return a.score > b.score end
-        return a.name < b.name
-    end)
-    apply_candidates_cache = out
-    return out
-end
-
--- Try every plausible call shape for a candidate: static and instance form,
--- display index and 0-based index. Which one is right is decided by the pouch
--- read-back, not by guessing the method's intent.
-local function call_candidate(cand, index)
-    local td = safe(sdk.find_type_definition, cand.type)
-    local m = td and safe(function() return td:get_method(cand.name) end)
-    if not m then return false, "method gone" end
-    local obj = safe(item_param) or safe(save_data)
-    local attempts = {}
-    for _, i in ipairs({ index, index - 1 }) do
-        attempts[#attempts + 1] = { self = nil, index = i }
-        if obj ~= nil then attempts[#attempts + 1] = { self = obj, index = i } end
-    end
-    for _, a in ipairs(attempts) do
-        local ok = safe(function()
-            if cand.params == 1 then
-                m:call(a.self, a.index)
-            else
-                m:call(a.self, a.index, false)
-            end
-            return true
-        end)
-        if ok then
-            return true, string.format("%s(%s%s)", cand.name, tostring(a.index),
-                a.self ~= nil and ", self" or "")
-        end
-    end
-    return false, "call failed"
-end
-
 -- ---------------------------------------------------------------------------
 -- runtime state
 -- ---------------------------------------------------------------------------
@@ -1528,17 +1449,6 @@ end
 -- apply pipeline
 -- ---------------------------------------------------------------------------
 
-local function static_method(type_name, signature)
-    local td = safe(sdk.find_type_definition, type_name)
-    return td and safe(function() return td:get_method(signature) end) or nil
-end
-
--- Which apply paths a task may use. Automatic tasks (quest accept, hub return)
--- write save data only by default: invoking a game method while the game tears a
--- quest down crashed the client at the end-of-quest screen. The game's own call
--- is still the manual path, where the player is standing somewhere safe.
--- The game throws when asked to apply an item-set slot it has no data for, so
--- only arguments the game itself calls valid are ever tried.
 -- Put `count` of `id` from a pouch work back into the item box. Save-data only:
 -- an existing box stack is raised first, otherwise an empty box slot is used.
 -- Returns true when the move happened (the item is never destroyed).
@@ -1597,27 +1507,6 @@ local function trim_pouch(index)
     return moved
 end
 
-local function item_set_valid(arg)
-    local m = static_method("app.ItemMySetUtil", "isValidData(System.Int32)")
-    if m == nil then return nil end
-    local v = safe(function() return m:call(nil, arg) end)
-    if v == nil then return nil end
-    return v == true
-end
-
-local function game_set_name(arg)
-    local m = static_method("app.ItemMySetUtil", "getItemMySetData(System.Int32)")
-    if m == nil then return nil end
-    local set = safe(function() return m:call(nil, arg) end)
-    if set == nil then return nil end
-    return safe_str(field_value(set, "Name"))
-end
-
--- Every restock is done with save-data writes: return what the set does not
--- list to the item box, then top the pouch up from it. The game's own apply is
--- not used at all any more - it threw on empty sets and, twice, took the client
--- down with an access violation right after a quest. The writes produce the same
--- pouch contents without calling into the game.
 local function strategies_for(link, index)
     local list = {}
     if link.apply_mode ~= "topup" then
@@ -3098,7 +2987,6 @@ local function draw_ui()
         end
         imgui.text("pouch slots: " .. tostring(#pouch_works())
             .. " | box slots: " .. tostring(#box_works()))
-        imgui.text("apply candidates: " .. tostring(#apply_candidates()))
         if imgui.button("Dump item API##dump_item_api") then
             safe(function() dump_item_api("button") end)
             notify("wrote reframework/data/linked_restock_item_api.json")
@@ -3185,7 +3073,6 @@ LR._test = {
     pouch_snapshot = pouch_snapshot,
     box_snapshot = box_snapshot,
     write_topup = write_topup,
-    apply_candidates = apply_candidates,
     set_config = function(c) config = c end,
     get_config = function() return config end,
 }

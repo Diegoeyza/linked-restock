@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.40 — the game's apply does not exist in the file any more
+
+0.1.35 stopped using it; this removes the machinery itself, so no future edit can
+reach it by accident:
+
+- `apply_candidates`, `call_candidate`, `static_method`, `item_set_valid` and
+  `game_set_name` are deleted (they were already unused),
+- the Diagnostics "apply candidates" line and the test for it are gone,
+- two stale comments that still described a manual game-apply path are rewritten.
+
+What is left of the game API in the file is **read-only**: array enumeration,
+item-master lookups (`getDataByFixedId`), localized strings, and the quest/loading
+state getters used by the hub gate. The only thing the mod writes is save-data
+fields (`Num`, `ItemIdFixed`) on pouch and item-box works.
+
+263 assertions green (logic 117, pipeline 101, gear 45).
+
 ## 0.1.39 — Apply now is the same path, and the pouch is checked twice
 
 `Apply now` was already write-only since 0.1.35, but it still had its own

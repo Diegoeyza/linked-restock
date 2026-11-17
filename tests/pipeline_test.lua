@@ -382,12 +382,6 @@ check(T.start_task(link, "back in the hub"), "an already-stocked task returns tr
 eq(T.state.task, nil, "no task is queued")
 check(T.state.last_result:find("already stocked") ~= nil, "and the panel says so")
 
--- 6) candidate ranking puts the item-set apply first
-local cands = T.apply_candidates()
-check(#cands >= 2, "candidates found")
-eq(cands[1].score, 3, "an item-set apply is ranked highest")
-check(cands[1].score > cands[2].score, "scores are ordered")
-
 -- 7) a link without an item set is refused, not crashed
 local bad = T.start_task({ id = "b", label = "no set" }, "test")
 check(bad == false, "a link without an item set is refused")
