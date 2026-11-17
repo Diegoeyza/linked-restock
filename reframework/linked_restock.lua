@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.32"
+local VERSION = "0.1.33"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1581,6 +1581,16 @@ local function strategies_for(link, index, auto, exact)
     local set_obj = item_sets()[index]
     local may_call_game = (not auto) or exact
 
+    if not may_call_game and (link.apply_mode ~= "topup") then
+        list[#list + 1] = {
+            label = "return extras to the item box",
+            run = function()
+                trim_pouch(index)
+                return true
+            end,
+        }
+    end
+
     -- the object form has no index to get wrong, so it goes first
     local apply_set = may_call_game and static_method("app.ItemMySetUtil",
         "apply(app.savedata.cItemMySet)")
@@ -2225,9 +2235,10 @@ local function poll()
             state.hub_done_seq = state.quest_seq
             state.hub_wait = 0
             state.dirty = true
-            -- exact = true: the task may use the game's own apply, and it still
-            -- falls back to the save-data top-up if that does not take
-            fire("back in the hub", true)
+            -- exact = false: automatic restocks use save-data writes only.
+            -- Calling the game's apply after a quest has crashed the client
+            -- twice, and the writes now produce the same exact pouch.
+            fire("back in the hub", false)
         elseif state.hub_wait > READY_RETRY_POLLS * 3 then
             -- the strict gate never opened (a getter misbehaving) but the game
             -- is out of the quest and loaded: top up without game code

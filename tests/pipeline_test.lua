@@ -582,5 +582,21 @@ rebuild_world({ item_work(1, 5), item_work(2, 3), item_work(3, 2) },
 eq(T.trim_pouch(1), 0, "a matching pouch is left alone")
 eq(T.pouch_snapshot()[1], 5, "and its counts are unchanged")
 
+-- 20) a write-only hub restock reaches the exact set with no game call
+rebuild_world({ item_work(1, 2), item_work(99, 4) },
+              { item_work(1, 9), item_work(2, 9), item_work(3, 9), item_work(0, 0) })
+T.state.task = nil
+T.state.pending_retry = nil
+world.apply_calls = 0
+world.on_apply = function() error("the automatic path must not call the game") end
+check(T.start_task(link, "back in the hub"), "a hub task starts")
+check(run_task(400), "it completes")
+local p20 = T.pouch_snapshot()
+eq(p20[1], 5, "the short stack is topped up to the set")
+eq(p20[2], 3, "a missing stack is added from the box")
+eq(p20[3], 2, "and the other one too")
+eq(p20[99], nil, "the stack that is not in the set was returned")
+eq(world.apply_calls, 0, "no game method was called")
+
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end

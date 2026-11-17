@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.33 — automatic restocks never call into the game again
+
+The crash log is unambiguous:
+
+```
+22:17:54  flow … loading=false                 ← hub finished loading
+22:17:58  ItemMySetUtil.apply(set) threw: lua: error: Invoke threw an exception
+22:18     crash dump written
+```
+
+Two crashes now, both from invoking the game's apply shortly after a quest. The
+manual call at 22:03 the same evening worked (`apply(set) -> true`,
+`restocked HH (22 items)`), so the call itself is fine in a settled hub — it is
+the quest-return window that cannot take it.
+
+- Automatic restocks (`back in the hub`, `quest accepted`) are **write-only**
+  again: no game method is called, so a mistimed attempt costs nothing.
+- Exactness now comes from the writes, in the order a manual apply would do it:
+  **return the extras and any excess to the item box first** (that also frees
+  pouch slots), then **top the pouch up from the box**, then verify. The result is
+  the set exactly — added items as missing, extras back in the box.
+- `Apply now` and a link's `Apply` still use the game's own call: that is the
+  manual path, in a settled hub, and it is proven.
+- `trim_pouch` is reported as `returned N stack(s) to the box`.
+
 ## 0.1.32 — apply(set) works, and the pouch ends exactly as a manual apply
 
 The four-path test settled it:
