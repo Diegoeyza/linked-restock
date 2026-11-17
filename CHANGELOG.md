@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.42 — the trace file actually opens (or says why not)
+
+The crash trace had never been exercised: no `linked_restock_trace.log` exists
+after a full session with tracing "always on". `io.open` with the
+`reframework/data/...` path clearly did not work, and the failure was silent by
+design.
+
+The trace now tries `reframework/data/linked_restock_trace.log`, then
+`linked_restock_trace.log` (the game root), and writes one line naming the path
+that worked. If neither opens it logs `trace: io.open failed for every path`
+once, instead of pretending.
+
 ## 0.1.41 — the game's own camp gate, and whether the pouch is the array we write
 
 The item API dump (0.1.39) turned out to be the useful part. `app.ItemUtil` has:

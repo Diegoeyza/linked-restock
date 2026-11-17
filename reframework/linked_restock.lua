@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.41"
+local VERSION = "0.1.42"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -125,9 +125,14 @@ end
 -- Append-only trace of the last actions, written next to the config. The
 -- REFramework log is truncated on the next launch, so a crash takes its evidence
 -- with it; this file stays. Only active with Debug log on.
-local TRACE_FILE = "reframework/data/linked_restock_trace.log"
+local TRACE_FILES = {
+    "reframework/data/linked_restock_trace.log",
+    "linked_restock_trace.log",
+}
 local trace_fh = nil
 local trace_off = false
+local trace_path = nil
+local trace_probed = false
 
 local function trace(text)
     if trace_off then return end
@@ -137,18 +142,32 @@ local function trace(text)
     end
     local ok = pcall(function()
         if trace_fh == nil then
-            -- start fresh when the file has grown past half a megabyte
-            local size = 0
-            local probe = io.open(TRACE_FILE, "r")
-            if probe ~= nil then
-                size = probe:seek("end") or 0
-                probe:close()
+            -- the first line of the session reports which path worked, if any
+            for _, path in ipairs(TRACE_FILES) do
+                local size = 0
+                local probe = io.open(path, "r")
+                if probe ~= nil then
+                    size = probe:seek("end") or 0
+                    probe:close()
+                end
+                local h = io.open(path, size > 524288 and "w" or "a")
+                if h ~= nil then
+                    trace_fh = h
+                    trace_path = path
+                    break
+                end
             end
-            trace_fh = io.open(TRACE_FILE, size > 524288 and "w" or "a")
-        end
-        if trace_fh == nil then
-            trace_off = true
-            return
+            if trace_fh == nil then
+                trace_off = true
+                log.info("[LinkedRestock] trace: io.open failed for every path")
+                return
+            end
+            if not trace_probed then
+                trace_probed = true
+                trace_fh:write(os.date("%Y-%m-%d %H:%M:%S "),
+                    "trace opened at ", tostring(trace_path), " (v", VERSION, ")\n")
+                trace_fh:flush()
+            end
         end
         trace_fh:write(os.date("%Y-%m-%d %H:%M:%S "), tostring(text), "\n")
         trace_fh:flush()
