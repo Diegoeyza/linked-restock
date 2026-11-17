@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.24"
+local VERSION = "0.1.25"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1488,8 +1488,12 @@ local function strategies_for(link, index, auto, exact)
         for _, base in ipairs({ index - 1, index }) do
             list[#list + 1] = {
                 label = "ItemMySetUtil.applyMySetToPouch(" .. tostring(base) .. ")",
+                game = true,
                 run = function()
-                    apply_pouch:call(nil, base)
+                    local m = static_method("app.ItemMySetUtil",
+                        "applyMySetToPouch(System.Int32)")
+                    if m == nil then error("applyMySetToPouch is not available") end
+                    m:call(nil, base)
                     return true
                 end,
             }
@@ -1501,8 +1505,14 @@ local function strategies_for(link, index, auto, exact)
     if apply_set ~= nil and set_obj ~= nil then
         list[#list + 1] = {
             label = "ItemMySetUtil.apply(set)",
+            game = true,
             run = function()
-                apply_set:call(nil, set_obj)
+                local m = static_method("app.ItemMySetUtil",
+                    "apply(app.savedata.cItemMySet)")
+                if m == nil then error("apply(cItemMySet) is not available") end
+                local set = item_sets()[index]
+                if set == nil then error("item set " .. tostring(index) .. " is gone") end
+                m:call(nil, set)
                 return true
             end,
         }
@@ -1613,7 +1623,8 @@ local function failure_detail(task)
         and "the pouch changed but the set is still short"
         or "the pouch never changed"
     local how = #tried > 0 and (" after " .. table.concat(tried, ", ")) or ""
-    return why .. how
+    local err = task.last_error and ("; error: " .. tostring(task.last_error)) or ""
+    return why .. how .. err
 end
 
 -- one file per failure, so a report does not need a reproduction script
@@ -1695,10 +1706,20 @@ local function tick_task()
             finish_task(false, failure_detail(task))
             return
         end
-        local ok = safe(strat.run)
-        if config.debug then
+        local ok, res = pcall(strat.run)
+        if not ok then
+            -- the managed call threw (not "did nothing"): keep the reason, and
+            -- stop trying game calls for this task, they will throw again
+            task.last_error = tostring(res)
+            task.trace[#task.trace + 1] = {
+                label = strat.label, error = task.last_error,
+            }
+            log.warn("[LinkedRestock] " .. tostring(strat.label)
+                .. " threw: " .. task.last_error)
+            if strat.game then task.try = #task.strategies - 1 end
+        elseif config.debug then
             log.info("[LinkedRestock] try " .. tostring(strat.label)
-                .. " -> " .. tostring(ok))
+                .. " -> " .. tostring(res))
         end
         task.last_label = strat.label
         task.phase = "verify"
@@ -1962,17 +1983,15 @@ local function flag(v)
     return false
 end
 
-local function hub_gate()
+-- Out of the quest, past the loading screen, item data readable. No writing is
+-- safe until this holds, and it is what the fallback clock counts.
+local function hub_base_ok()
     local mm = safe(function()
         return sdk.get_managed_singleton("app.MissionManager")
     end)
     if mm == nil then return false, "no quest manager" end
     if flag(call_method(mm, "get_IsPlayingQuest")) then return false, "in a quest" end
     if flag(call_method(mm, "get_IsActiveQuest")) then return false, "quest active" end
-    if flag(call_method(mm, "get_IsQuestResult")) then return false, "results screen" end
-    if flag(call_method(mm, "get_IsQuestEndShowing")) then
-        return false, "quest end screen"
-    end
     local gfm = safe(function()
         return sdk.get_managed_singleton("app.GameFlowManager")
     end)
@@ -1980,6 +1999,19 @@ local function hub_gate()
         return false, "loading"
     end
     if not world_ready() then return false, "item data not readable" end
+    return true
+end
+
+local function hub_gate()
+    local ok, why = hub_base_ok()
+    if not ok then return false, why end
+    local mm = safe(function()
+        return sdk.get_managed_singleton("app.MissionManager")
+    end)
+    if flag(call_method(mm, "get_IsQuestResult")) then return false, "results screen" end
+    if flag(call_method(mm, "get_IsQuestEndShowing")) then
+        return false, "quest end screen"
+    end
     return true
 end
 
@@ -2049,14 +2081,25 @@ local function poll()
     -- Is the game out of the quest AND the hub loaded? This is the precise gate
     -- the exact item-set call needs, and it also decides when the hub restock
     -- runs: stage 1 (top-up) then stage 2 (the game's own apply) in one task.
+    local pending_hub = config.triggers.hub_return and q == false
+        and state.quest_seq > 0 and state.quest_seq > state.hub_done_seq
+
     local gate_ok, gate_why = false, nil
-    if q == false then gate_ok, gate_why = hub_gate() end
+    local base_ok = false
+    if q == false then
+        local b_ok, b_why = hub_base_ok()
+        base_ok = b_ok
+        if b_ok then gate_ok, gate_why = hub_gate() else gate_why = b_why end
+    end
     state.gate_reason = gate_why
     state.settled_polls = gate_ok and ((state.settled_polls or 0) + 1) or 0
+    -- the "gate never opened" clock only runs while a restock is pending AND the
+    -- game is out of the quest, past loading: counting it on the results screen
+    -- made it fire as soon as loading began, and mid-quest before 0.1.24
+    state.hub_wait = (base_ok and pending_hub)
+        and ((state.hub_wait or 0) + 1) or 0
 
-    if config.triggers.hub_return and q == false and state.quest_seq > 0
-        and state.quest_seq > state.hub_done_seq then
-        state.hub_wait = (state.hub_wait or 0) + 1
+    if pending_hub then
         if state.settled_polls >= hub_need_polls() then
             state.hub_done_seq = state.quest_seq
             state.hub_wait = 0
@@ -2065,17 +2108,13 @@ local function poll()
             -- falls back to the save-data top-up if that does not take
             fire("back in the hub", true)
         elseif state.hub_wait > READY_RETRY_POLLS * 3 then
-            -- the gate never opened (one of the getters is misbehaving): top up
-            -- so the pouch is not left short, without touching game code
+            -- the strict gate never opened (a getter misbehaving) but the game
+            -- is out of the quest and loaded: top up without game code
             state.hub_done_seq = state.quest_seq
             state.hub_wait = 0
-            note("hub never settled (" .. tostring(gate_why) .. "), topping up")
+            note("hub gate stuck (" .. tostring(gate_why) .. "), topping up")
             fire("back in the hub", false)
         end
-    else
-        -- in a quest, or nothing pending: the fallback clock must not accumulate
-        -- across a hunt or it would fire a restock mid-quest
-        state.hub_wait = 0
     end
 
 end

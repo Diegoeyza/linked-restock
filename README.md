@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.24 — verified on the live build.** The probe confirmed the
+> **Status: v0.1.25 — verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -121,9 +121,10 @@ and the hub is loaded — `get_IsQuestResult` and `get_IsQuestEndShowing` false,
 held for ~3 s. It then runs one task that tries the game's own call first and
 falls back to the top-up. There is no switch for it: this is always what happens.
 The `Quest:` line names the blocking condition while it waits
-(`in the hub - waiting (results screen)`) and counts up when it is free. If the
-gate never opens for a minute, the mod tops up without touching game code rather
-than leaving the pouch short. The hub restock is impossible mid-quest by
+(`in the hub - waiting (results screen)`) and counts up when it is free. If the gate never opens for a minute **while the hub is genuinely loaded** (a
+getter misbehaving), the mod tops up without touching game code rather than
+leaving the pouch short; the clock does not run on the results or loading
+screens. The hub restock is impossible mid-quest by
 construction: the wait only counts while the game is out of a quest, retries
 require the same gate, and the task itself refuses to start if a quest is
 playing.

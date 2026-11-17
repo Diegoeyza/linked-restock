@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.1.25 — the fallback waits for loading to finish, and a throwing call says why
+
+Found in the live log (0.1.24):
+
+```
+20:42:59  flow playing=false active=false ... loading=true      ← hub loading starts
+20:43:01  hub never settled (loading), topping up               ← 1.4 s later
+20:43:01  try ItemMySetUtil.applyMySetToPouch(3) -> nil          ← the call threw
+20:43:02  try ItemMySetUtil.applyMySetToPouch(4) -> nil
+20:43:02  try ItemMySetUtil.apply(set) -> nil
+20:43:03  try top-up from the item box -> true
+20:43:03  restocked HH (5 items)
+```
+
+Two things were wrong:
+
+- **The fallback clock counted the results screen.** `get_IsPlayingQuest()` is
+  false there, so the "gate never opened" timer ran for the whole result page and
+  fired the moment loading began. The gate is now split: *base* (out of the
+  quest, not loading, item data readable) and *strict* (also no result/end
+  screen). The fallback clock counts only base, so it cannot fire on the result
+  page or during loading, and it is 60 s of a genuinely loaded hub.
+- **A throwing managed call was silent.** `safe()` swallowed it, so the panel just
+  said "the pouch never changed". Now the error is logged at warning level, kept
+  in the failure dump, and included in the status line
+  (`... ; error: <message>`). A throwing game call is also skipped for the rest of
+  that task instead of being retried three times, so the top-up runs immediately.
+- The managed method is resolved **at call time** rather than when the task is
+  built, in case a handle goes stale across a scene or save update.
+
+The automatic restock still goes through the top-up when the game call fails, so
+the pouch is never left short.
+
 ## 0.1.24 — a hub restock can never run mid-quest
 
 Reported in game: it tried to restock just after a quest started, with only

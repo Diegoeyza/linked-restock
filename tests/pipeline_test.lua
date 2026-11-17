@@ -503,5 +503,42 @@ T.on_frame()
 eq(T.state.pending_retry, nil, "it runs once the hub is settled")
 T.state.task = nil
 
+-- 14) the fallback clock does not run on the results or loading screens
+T.get_config().triggers.hub_return = true
+T.state.quest_seq = 7
+T.state.hub_done_seq = 6
+T.state.hub_wait = 0
+T.state.settled_polls = 0
+T.state.last_in_quest = false
+T.state.task = nil
+mm.playing, mm.active = false, true          -- results screen
+mm.result, mm.ending, mm.gfm_loading = false, false, false
+for _ = 1, 150 do T.poll() end
+eq(T.state.hub_wait, 0, "the fallback clock stays at zero on the results screen")
+eq(T.state.hub_done_seq, 6, "and no restock was fired there")
+
+mm.active = false
+mm.gfm_loading = true                        -- loading into the hub
+for _ = 1, 150 do T.poll() end
+eq(T.state.hub_wait, 0, "the fallback clock stays at zero while loading")
+eq(T.state.hub_done_seq, 6, "and again nothing fired")
+
+-- 15) a game call that throws is logged, skipped, and the top-up finishes
+mm.gfm_loading = false
+mm.result, mm.ending = false, false
+rebuild_world({ item_work(1, 1) }, { item_work(1, 9) })
+world.apply_calls = 0
+world.on_apply = function() error("boom from the game") end
+T.state.task = nil
+T.state.pending_retry = nil
+check(T.start_task(link, "back in the hub", nil, true),
+    "an exact hub task starts (game calls allowed)")
+check(run_task(), "it completes despite the throwing game call")
+eq(world.apply_calls, 1, "only the first game call was attempted")
+eq(T.pouch_snapshot()[1], 5, "the top-up did the work")
+check(T.state.last_result:find("restocked") ~= nil, "and the result says restocked")
+T.state.task = nil
+T.state.pending_retry = nil
+
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end
