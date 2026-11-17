@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.29 — one throwing call no longer hides the others
+
+0.1.25 skipped the remaining game calls of a task after the first one threw. The
+test line proves that was wrong: `applyMySetToPouch(3)` throws while `(4)`
+returns ok, so the working call was being skipped. Every strategy is tried on its
+own again, and the validity filter from 0.1.28 keeps the known-invalid arguments
+out of the list in the first place.
+
 ## 0.1.28 — the game rejects empty item-set slots, and says so
 
 The one-click test answered the question in a single line:

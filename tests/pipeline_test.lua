@@ -549,7 +549,7 @@ T.state.pending_retry = nil
 check(T.start_task(link, "back in the hub", nil, true),
     "an exact hub task starts (game calls allowed)")
 check(run_task(), "it completes despite the throwing game call")
-eq(world.apply_calls, 1, "only the first game call was attempted")
+check(world.apply_calls >= 2, "the other game call is still attempted")
 eq(T.pouch_snapshot()[1], 5, "the top-up did the work")
 check(T.state.last_result:find("restocked") ~= nil, "and the result says restocked")
 T.state.task = nil

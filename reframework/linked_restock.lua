@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.28"
+local VERSION = "0.1.29"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1773,7 +1773,9 @@ local function tick_task()
             }
             log.warn("[LinkedRestock] " .. tostring(strat.label)
                 .. " threw: " .. task.last_error)
-            if strat.game then task.try = #task.strategies - 1 end
+            -- do NOT skip the other game calls: different arguments behave
+            -- differently (an invalid slot throws, a valid one applies), so each
+            -- strategy stands on its own
         elseif config.debug then
             log.info("[LinkedRestock] try " .. tostring(strat.label)
                 .. " -> " .. tostring(res))
