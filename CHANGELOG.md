@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.39 — Apply now is the same path, and the pouch is checked twice
+
+`Apply now` was already write-only since 0.1.35, but it still had its own
+retry policy (one attempt) and skipped the hub gate. Nothing distinguishes it
+from a trigger any more:
+
+- one strategy list, one retry policy (three attempts, spread out),
+- a retry waits for a settled hub whoever started the task,
+- the stale "then the game's own apply" caption is gone.
+
+**Diagnosing "it did not restock"**: the 00:17 run logged
+`restocked Base (9 items)` — the writes verified against the save data — so
+either the pouch really changed or the game keeps a separate runtime pouch that
+ignores save-data writes. Two new lines decide which:
+
+- `pouch after <set>: <id>:<n> …` — the pouch the mod just read back,
+- `recheck <set> +5s: still stocked` or `N item(s) changed back` — the same pouch
+  five seconds later. `changed back` means the game overwrote the writes.
+
+`reframework/data/linked_restock_item_api.json` is written once per launch (and
+from Diagnostics) with every method signature of `app.ItemUtil`,
+`app.ItemMySetUtil`, `app.ItemPouchUtil`, `app.savedata.cItemParam`, `app.cItemParam`
+and `app.cItemWork`, to find the accessor the item screen itself uses.
+
 ## 0.1.38 — the trigger says which build it saw, and why a link was passed over
 
 0.1.35 ran a full session (23:14 → 00:08: four quests, three restocks) with **zero

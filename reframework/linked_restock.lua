@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.38"
+local VERSION = "0.1.39"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1686,7 +1686,6 @@ local function start_task(link, reason, retry, exact)
         notify("item data is not readable yet, will retry")
         return false, "item data not readable"
     end
-    local auto = (reason == "quest accepted" or reason == "back in the hub")
     if reason == "back in the hub" and in_quest() == true then
         note("hub restock refused: a quest is playing")
         return false, "in a quest"
@@ -1701,7 +1700,6 @@ local function start_task(link, reason, retry, exact)
         diff = diff,
         missing = missing,
         mode = mode,
-        auto = auto,
         strategies = strategies_for(link, index),
         try = 1,
         attempts = 0,
@@ -1793,15 +1791,33 @@ local function finish_task(ok, detail)
         end
         if detail then parts[#parts + 1] = "- " .. detail end
         notify(table.concat(parts, " "))
+        -- what the pouch holds now: if the item screen disagrees, the log proves
+        -- whether the writes landed or the game rewrote the pouch afterwards
+        local after = pouch_snapshot()
+        local bits = {}
+        for id, n in pairs(after) do
+            if type(n) == "number" and n > 0 then
+                bits[#bits + 1] = tostring(id) .. ":" .. tostring(n)
+            end
+        end
+        table.sort(bits)
+        local line = "pouch after " .. label .. ": " .. table.concat(bits, " ")
+        log.info("[LinkedRestock] " .. line)
+        trace(line)
+        -- five seconds later, confirm the game did not rewrite the pouch from its
+        -- own runtime copy: the writes can verify now and be gone by the time
+        -- the item screen is opened
+        state.recheck = { index = task.index, label = label,
+                          at = state.frames + 300 }
     else
         notify("restock failed for " .. label .. (detail and (" - " .. detail) or ""))
         dump_failure(task, detail)
         -- the game is often still settling right after a quest; re-read and try
         -- again a moment later instead of giving up on the first attempt
-        local limit = task.auto and 3 or 1
+        local limit = 3
         if (task.retry or 0) < limit and task.link ~= nil then
             state.pending_retry = {
-                link = task.link, reason = task.reason, auto = task.auto,
+                link = task.link, reason = task.reason,
                 retry = (task.retry or 0) + 1, at = state.frames + 240,
             }
             note("will retry " .. label .. " in a few seconds")
@@ -1933,6 +1949,52 @@ local API_VALUES = {
 }
 
 local api_dumped = false
+
+-- Every method of the item/pouch types, with parameter and return types. The
+-- pouch the game shows is not necessarily the array this mod writes, and finding
+-- the accessor the UI itself uses needs the real signatures.
+local ITEM_API_TYPES = {
+    "app.ItemUtil", "app.ItemMySetUtil", "app.ItemPouchUtil", "app.ItemManager",
+    "app.savedata.cItemParam", "app.cItemParam", "app.cItemWork",
+}
+
+local function dump_item_api(why)
+    local out = { version = VERSION, why = why,
+                  at = os.date("%Y-%m-%d %H:%M:%S"), types = {} }
+    for _, tn in ipairs(ITEM_API_TYPES) do
+        local td = safe(sdk.find_type_definition, tn)
+        local entry = { found = td ~= nil, methods = {} }
+        if td ~= nil then
+            entry.singleton = safe(function()
+                return sdk.get_managed_singleton(tn)
+            end) ~= nil
+            local methods = safe(function() return td:get_methods() end) or {}
+            for _, m in ipairs(methods) do
+                local name = tostring(safe(function() return m:get_name() end) or "")
+                if name ~= "" then
+                    local params = {}
+                    local pts = safe(function() return m:get_param_types() end)
+                    local n = method_param_count(m) or 0
+                    for i = 1, n do
+                        local one = pts and safe(function() return pts[i] end)
+                        params[#params + 1] = one ~= nil
+                            and tostring(safe(function() return one:get_full_name() end) or "?")
+                            or "?"
+                    end
+                    local ret = safe(function() return m:get_return_type() end)
+                    entry.methods[#entry.methods + 1] =
+                        name .. "(" .. table.concat(params, ", ") .. ")"
+                        .. (ret ~= nil and (" -> " .. tostring(safe(function()
+                            return ret:get_full_name() end) or "?")) or "")
+                        .. (method_is_static(m) and " [static]" or "")
+                end
+            end
+            table.sort(entry.methods)
+        end
+        out.types[tn] = entry
+    end
+    safe(function() json.dump_file("linked_restock_item_api.json", out) end)
+end
 
 local function dump_api_impl(why)
     local out = { version = VERSION, why = why,
@@ -2265,9 +2327,6 @@ local function poll()
             state.hub_done_seq = state.quest_seq
             state.hub_wait = 0
             state.dirty = true
-            -- exact = false: automatic restocks use save-data writes only.
-            -- Calling the game's apply after a quest has crashed the client
-            -- twice, and the writes now produce the same exact pouch.
             fire("back in the hub")
         elseif state.hub_wait > READY_RETRY_POLLS * 3 then
             -- the strict gate never opened (a getter misbehaving) but the game
@@ -2283,13 +2342,32 @@ end
 
 local function on_frame()
     state.frames = state.frames + 1
+    if not state.item_api_dumped and state.frames == 240 then
+        state.item_api_dumped = true
+        safe(function() dump_item_api("auto") end)
+    end
+    if state.recheck ~= nil and state.frames >= state.recheck.at then
+        local rc = state.recheck
+        state.recheck = nil
+        safe(function()
+            local contents = item_set_contents(rc.index)
+            if contents == nil then return end
+            local diff = compute_diff(contents, pouch_snapshot(), box_snapshot(),
+                "exact", pouch_free_slots())
+            local line = "recheck " .. tostring(rc.label) .. " +5s: "
+                .. ((#diff == 0) and "still stocked"
+                    or (tostring(#diff) .. " item(s) changed back"))
+            log.info("[LinkedRestock] " .. line)
+            trace(line)
+        end)
+    end
     state.last_gear_source = last_gear_source
     if state.pending_retry ~= nil and state.frames >= state.pending_retry.at
         and state.task == nil then
         local r = state.pending_retry
-        if r.auto and not hub_gate() then
-            -- an automatic retry only runs on a settled hub: never mid-quest,
-            -- never on the results or loading screens
+        if not hub_gate() then
+            -- a retry only runs on a settled hub, whoever started the task:
+            -- never mid-quest, never on the results or loading screens
             r.at = state.frames + 120
         else
             state.pending_retry = nil
@@ -2691,7 +2769,7 @@ local function draw_ui()
     imgui.text("  links match on: " .. match_text({ sig = {} }))
     local c4, v4 = imgui.checkbox("Notify missing items", config.notify_missing)
     if c4 then config.notify_missing = v4 changed = true end
-    imgui.text("automatic: top-up at the trigger, then the game's own apply")
+    imgui.text("restock: return extras to the box, then top up (save-data writes)")
     imgui.text("  once the hub is loaded and quiet (~10 s)")
 
     imgui.separator()
@@ -3021,6 +3099,10 @@ local function draw_ui()
         imgui.text("pouch slots: " .. tostring(#pouch_works())
             .. " | box slots: " .. tostring(#box_works()))
         imgui.text("apply candidates: " .. tostring(#apply_candidates()))
+        if imgui.button("Dump item API##dump_item_api") then
+            safe(function() dump_item_api("button") end)
+            notify("wrote reframework/data/linked_restock_item_api.json")
+        end
         if imgui.button("Dump flow API##dump_api") then
             safe(function() dump_api_impl("button") end)
             notify("wrote reframework/data/linked_restock_api.json")

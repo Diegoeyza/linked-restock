@@ -494,16 +494,16 @@ eq(T.state.hub_wait, 0, "the hub fallback clock stays at zero during a quest")
 eq(T.state.hub_done_seq, 4, "and the pending restock is not marked handled")
 eq(T.state.task, nil, "no restock was started mid-quest")
 
--- 13) an automatic retry is held until the hub settles
+-- 13) a retry is held until the hub settles
 mm.playing, mm.active = false, false
 T.state.last_in_quest = false
 T.state.task = nil
 T.state.frames = 100
-T.state.pending_retry = { link = link, reason = "back in the hub", auto = true,
+T.state.pending_retry = { link = link, reason = "back in the hub",
                           exact = true, retry = 1, at = 0 }
 mm.playing = true
 T.on_frame()
-check(T.state.pending_retry ~= nil, "an automatic retry is held during a quest")
+check(T.state.pending_retry ~= nil, "the retry is held during a quest")
 check(T.state.pending_retry.at > T.state.frames, "and rescheduled for later")
 mm.playing = false
 mm.result, mm.ending, mm.gfm_loading = false, false, false
