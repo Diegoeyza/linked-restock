@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.36"
+local VERSION = "0.1.37"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -131,7 +131,6 @@ local trace_off = false
 
 local function trace(text)
     if trace_off then return end
-    if not config or not config.debug then return end
     if type(io) ~= "table" or type(io.open) ~= "function" then
         trace_off = true
         return

@@ -1,12 +1,17 @@
 # Changelog
 
+## 0.1.37 — crash breadcrumb, always on
+
+Tracing no longer depends on **Debug log**: a crash is exactly when it must not
+be missing.
+
 ## 0.1.36 — a crash breadcrumb that survives the restart
 
 The game crashed again and the REFramework log was truncated by the next launch,
 so the evidence was gone. This build keeps its own append-only trace:
 
-`reframework/data/linked_restock_trace.log` (only with **Debug log** on, capped at
-512 KB) records, with timestamps:
+`reframework/data/linked_restock_trace.log` (always on — a few lines per restock,
+capped at 512 KB) records, with timestamps:
 
 - `fire <reason> -> <link> set=N`
 - `task start`, `run <strategy>`, `verify left=N`, `finish ok=...`
