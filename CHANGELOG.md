@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.36 — a crash breadcrumb that survives the restart
+
+The game crashed again and the REFramework log was truncated by the next launch,
+so the evidence was gone. This build keeps its own append-only trace:
+
+`reframework/data/linked_restock_trace.log` (only with **Debug log** on, capped at
+512 KB) records, with timestamps:
+
+- `fire <reason> -> <link> set=N`
+- `task start`, `run <strategy>`, `verify left=N`, `finish ok=...`
+- `trim id=N n=N` for every stack returned to the box
+- `topup id=N have=N to=N add=N` for every pouch slot raised
+
+So the last line before a crash names the exact operation in flight. If the crash
+is in the write path, the line immediately before it is which item and which
+field.
+
+The restock itself is unchanged from 0.1.35: save-data writes only, no game
+method is ever called.
+
 ## 0.1.35 — the game's apply is gone from the mod entirely
 
 The last run ended like this:

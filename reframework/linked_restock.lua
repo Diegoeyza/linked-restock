@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.35"
+local VERSION = "0.1.36"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -121,6 +121,41 @@ end
 -- ---------------------------------------------------------------------------
 -- helpers
 -- ---------------------------------------------------------------------------
+
+-- Append-only trace of the last actions, written next to the config. The
+-- REFramework log is truncated on the next launch, so a crash takes its evidence
+-- with it; this file stays. Only active with Debug log on.
+local TRACE_FILE = "reframework/data/linked_restock_trace.log"
+local trace_fh = nil
+local trace_off = false
+
+local function trace(text)
+    if trace_off then return end
+    if not config or not config.debug then return end
+    if type(io) ~= "table" or type(io.open) ~= "function" then
+        trace_off = true
+        return
+    end
+    local ok = pcall(function()
+        if trace_fh == nil then
+            -- start fresh when the file has grown past half a megabyte
+            local size = 0
+            local probe = io.open(TRACE_FILE, "r")
+            if probe ~= nil then
+                size = probe:seek("end") or 0
+                probe:close()
+            end
+            trace_fh = io.open(TRACE_FILE, size > 524288 and "w" or "a")
+        end
+        if trace_fh == nil then
+            trace_off = true
+            return
+        end
+        trace_fh:write(os.date("%Y-%m-%d %H:%M:%S "), tostring(text), "\n")
+        trace_fh:flush()
+    end)
+    if not ok then trace_fh = nil end
+end
 
 local function safe(fn, ...)
     local ok, res = pcall(fn, ...)
@@ -1142,6 +1177,8 @@ local function write_topup(diff)
                 if id == c.id then
                     local have = enum_number(field_value(w, "Num")) or 0
                     local add = math.min(need - placed, math.max(0, c.to - have))
+            trace("topup id=" .. tostring(c.id) .. " have=" .. tostring(have)
+                .. " to=" .. tostring(c.to) .. " add=" .. tostring(add))
                     if add > 0 and write_field(w, "Num", have + add) then
                         placed = placed + add
                     end
@@ -1552,8 +1589,9 @@ local function trim_pouch(index)
             elseif n > target then
                 extra = n - target
             end
-            if extra and extra > 0 and move_stack_to_box(w, id, extra) then
-                moved = moved + 1
+            if extra and extra > 0 then
+                trace("trim id=" .. tostring(id) .. " n=" .. tostring(extra))
+                if move_stack_to_box(w, id, extra) then moved = moved + 1 end
             end
         end
     end
@@ -1674,6 +1712,8 @@ local function start_task(link, reason, retry, exact)
         trace = {},
         retry = retry or 0,
     }
+    trace("task start set=" .. tostring(index) .. " diff=" .. tostring(#diff)
+        .. " mode=" .. tostring(mode))
     if #diff == 0 then
         state.task = nil
         notify("pouch already stocked for " .. tostring(link.item_set_name or index))
@@ -1734,6 +1774,7 @@ local function finish_task(ok, detail)
     state.task = nil
     if task == nil then return end
     local label = tostring(task.link.item_set_name or task.link.item_set)
+    trace("finish ok=" .. tostring(ok) .. " " .. tostring(detail or ""))
     if ok then
         local parts
         if #task.diff > 0 then
@@ -1791,6 +1832,7 @@ local function tick_task()
             finish_task(false, failure_detail(task))
             return
         end
+        trace("run " .. tostring(strat.label) .. " diff=" .. tostring(#(task.diff or {})))
         local ok, res = pcall(strat.run)
         if not ok then
             -- the managed call threw (not "did nothing"): keep the reason, and
@@ -1818,6 +1860,8 @@ local function tick_task()
     -- "the pouch now holds what this item set asks for"
     local diff_now = compute_diff(contents, pouch_snapshot(), box_snapshot(),
         task.mode, pouch_free_slots())
+    trace("verify left=" .. tostring(#diff_now) .. " after "
+        .. tostring(task.last_label))
     task.trace[#task.trace + 1] = {
         label = task.last_label or "?", left = #diff_now,
     }
@@ -2020,6 +2064,8 @@ local function fire(reason)
     }
     state.last_fire = { reason = reason, at = state.frames,
                         label = link.label }
+    trace("fire " .. tostring(reason) .. " -> " .. tostring(link.label)
+        .. " set=" .. tostring(link.item_set))
     local ok, err2 = start_task(link, reason)
     if not ok then
         note("cannot restock: " .. tostring(err2 or "unknown"))
