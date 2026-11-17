@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.45 — the hub restock checks the hub, and the reason is readable
+
+The gate now asks the game whether the player is actually at a camp, instead of
+trusting "out of quest + loaded":
+
+- `app.cCampManager` is located with three strategies (`managed_singleton`,
+  `native_singleton`, name variant), cached, and retried every 5 s while missing.
+- `hub_camp_state()` = `get_InZoneGimmick() ~= nil` **or** `checkIsInTent() == true`
+  — the game's own camp/tent state. It is what the hub restock waits for.
+- **Self-calibrating:** the check only starts being enforced after the game has
+  shown a camp zone once, so a build that cannot see the camp manager behaves
+  exactly as before instead of never restocking.
+- **Safety valve:** if the gate is blocked by `not at a camp` for ~40 s while the
+  game is otherwise settled, the check is dropped for the session with a log line
+  (`camp check never matched at the hub - ignoring it`). A wrong camp signal can
+  cost a restart, not a silent broken mod.
+- The "hub gate stuck" fallback never bypasses an explicit `not at a camp`.
+- `scene=` and `stage=` in the flow line are now enum **names**
+  (`scene=Field(1)`, `stage=ST101(2)`) instead of bare numbers, so which scene is
+  the hub is readable without guessing.
+- Quest accept and **Apply now** are unaffected: the camp wait belongs to the hub
+  return only.
+
 ## 0.1.43 — the game's tent/camp state, found the hard way
 
 `canSetupCamp()` turned out to be a poor camp signal: it flips `0 ↔ 4` every few

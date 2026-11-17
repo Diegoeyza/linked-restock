@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.43"
+local VERSION = "0.1.45"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -328,6 +328,39 @@ local function camp_manager()
         end
     end
     return nil
+end
+
+-- "Name(3)" for an enum value when the game will stringify it, plain number
+-- otherwise. Splitting hub from field by a name beats remembering a magic int.
+local function enum_label(v)
+    if v == nil then return nil end
+    local n = enum_number(v)
+    local text = safe(function() return v:call("ToString") end)
+    if type(text) ~= "string" or text == "" then
+        text = safe(function() return v:call("ToString()") end)
+    end
+    if type(text) == "string" and text ~= "" and text ~= tostring(n) then
+        return text .. "(" .. tostring(n) .. ")"
+    end
+    return tostring(n)
+end
+
+-- Set once the game has shown us a camp zone: from that point on a hub restock
+-- waits for it, instead of trusting "out of quest + loaded" alone.
+local camp_seen = false
+
+-- Is the player at a camp / the hub? The game's own answer, from cCampManager.
+-- Returns nil when the instance could not be found, so the caller can fall back.
+local function hub_camp_state()
+    local cm = camp_manager()
+    if cm == nil then return nil, "camp state unavailable" end
+    local zone = call_named(cm, "get_InZoneGimmick")
+    local tent = call_named(cm, "checkIsInTent")
+    if zone ~= nil or tent == true then
+        camp_seen = true
+        return true, tent == true and "in the tent" or "at a camp"
+    end
+    return false, "not at a camp"
 end
 
 local function camp_live()
@@ -2085,8 +2118,8 @@ local function flow_trace(q)
     local gfm = safe(function() return sdk.get_managed_singleton("app.GameFlowManager") end)
     local loading = gfm and call_method(gfm, "get_Loading")
     local camp, camp_item = camp_state()
-    local scene = enum_number(call_method(gfm, "get_CurrentGameScene"))
-    local stage = enum_number(call_method(mm, "getActiveStageType"))
+    local scene = enum_label(call_method(gfm, "get_CurrentGameScene"))
+    local stage = enum_label(call_method(mm, "getActiveStageType"))
     local live, live_why = camp_live()
     local tuple = string.format(
         "playing=%s active=%s questdata=%s director=%s result=%s ending=%s loading=%s camp=%s campitem=%s scene=%s stage=%s %s",
@@ -2259,6 +2292,12 @@ local function hub_gate()
     if flag(call_method(mm, "get_IsQuestEndShowing")) then
         return false, "quest end screen"
     end
+    -- the restock belongs to the hub: once the game has shown a camp zone at
+    -- least once, a hub restock only runs while the player is at one
+    local at_camp, camp_why = hub_camp_state()
+    if camp_seen and at_camp ~= true then
+        return false, tostring(camp_why or "not at a camp")
+    end
     return true
 end
 
@@ -2339,6 +2378,18 @@ local function poll()
         if b_ok then gate_ok, gate_why = hub_gate() else gate_why = b_why end
     end
     state.gate_reason = gate_why
+    -- safety valve: if the camp check never matches at the hub, it is wrong for
+    -- this player's flow - drop it for the session instead of never restocking
+    if gate_why == "not at a camp" then
+        state.camp_blocked = (state.camp_blocked or 0) + 1
+        if state.camp_blocked > READY_RETRY_POLLS * 2 then
+            camp_seen = false
+            state.camp_blocked = 0
+            note("camp check never matched at the hub - ignoring it for this session")
+        end
+    else
+        state.camp_blocked = 0
+    end
     state.settled_polls = gate_ok and ((state.settled_polls or 0) + 1) or 0
     -- the "gate never opened" clock only runs while a restock is pending AND the
     -- game is out of the quest, past loading: counting it on the results screen
@@ -2352,9 +2403,12 @@ local function poll()
             state.hub_wait = 0
             state.dirty = true
             fire("back in the hub")
-        elseif state.hub_wait > READY_RETRY_POLLS * 3 then
+        elseif state.hub_wait > READY_RETRY_POLLS * 3
+            and tostring(gate_why) ~= "not at a camp" then
             -- the strict gate never opened (a getter misbehaving) but the game
-            -- is out of the quest and loaded: top up without game code
+            -- is out of the quest and loaded: top up without game code. The camp
+            -- check is never bypassed: if the player is not at the hub, waiting
+            -- is correct.
             state.hub_done_seq = state.quest_seq
             state.hub_wait = 0
             note("hub gate stuck (" .. tostring(gate_why) .. "), topping up")
@@ -3182,6 +3236,8 @@ LR._test = {
     mode_to_index = mode_to_index,
     labeled_dropdown = labeled_dropdown,
     hub_gate = hub_gate,
+    hub_camp_state = hub_camp_state,
+    reset_camp_seen = function() camp_seen = false end,
     hub_need_polls = hub_need_polls,
     trim_pouch = trim_pouch,
     link_mismatch = link_mismatch,

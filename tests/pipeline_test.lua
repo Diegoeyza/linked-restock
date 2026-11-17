@@ -199,6 +199,21 @@ local util_td = {
     end,
 }
 
+-- fake app.cCampManager: get_InZoneGimmick is the camp-zone answer
+camp_mgr = {
+    in_zone = nil,
+    in_tent = false,
+    call = function(self, name)
+        if name == "get_InZoneGimmick" or name == "get_InZoneGimmick()" then
+            return self.in_zone
+        end
+        if name == "checkIsInTent" or name == "checkIsInTent()" then
+            return self.in_tent
+        end
+        return nil
+    end,
+}
+
 re = { on_frame = function() end, on_draw_ui = function() end }
 sdk = {
     find_type_definition = function(name)
@@ -210,6 +225,7 @@ sdk = {
         if name == "app.SaveDataManager" then return sdm end
         if name == "app.MissionManager" then return mm end
         if name == "app.GameFlowManager" then return mm end
+        if name == "app.cCampManager" then return camp_mgr end
         return nil
     end,
 }
@@ -372,6 +388,28 @@ mm.playing = true
 eq(T.hub_gate(), false, "a quest closes the gate")
 mm.playing = false
 eq(T.hub_gate(), true, "and it opens again once nothing is in flight")
+
+-- 5e) the hub restock waits for a camp, once the game has shown one
+T.reset_camp_seen()
+camp_mgr.in_zone, camp_mgr.in_tent = nil, false
+eq(T.hub_gate(), true, "before any camp is seen the gate behaves as before")
+
+camp_mgr.in_zone = { id = 1 }
+eq(T.hub_gate(), true, "a camp zone opens the gate")
+eq(select(1, T.hub_camp_state()), true, "and the camp state says so")
+
+camp_mgr.in_zone = nil
+local okc, whyc = T.hub_gate()
+eq(okc, false, "leaving the camp closes the gate again")
+eq(whyc, "not at a camp", "and names the reason")
+eq(select(1, T.hub_camp_state()), false, "the camp state reports the same")
+
+camp_mgr.in_tent = true
+eq(T.hub_gate(), true, "being in a tent also counts as a camp")
+camp_mgr.in_tent = false
+
+T.reset_camp_seen()
+eq(T.hub_gate(), true, "and the old behaviour returns if the flag is reset")
 
 -- 5f) an already matching pouch starts nothing at all
 rebuild_world({ item_work(1, 5), item_work(2, 3), item_work(3, 2) },
