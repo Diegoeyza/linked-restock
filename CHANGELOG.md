@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.34 — an empty item set is refused, never applied
+
+The client was running with a link pointing at an **unregistered item set**, and
+the log shows exactly what that does:
+
+```
+22:44:08  ItemMySetUtil.applyMySetToPouch(0) threw: lua: error: Invoke threw an exception
+22:44:08  ItemMySetUtil.applyMySetToPouch(1) threw: ...
+22:44:09  try top-up from the item box -> true
+22:44:10  restock failed for Base - the pouch never changed ...
+```
+
+An empty slot makes the game's own apply raise — and a raised apply after a quest
+crashed the client once already. That explains both the failure and the crash.
+
+- `start_task` refuses an item set with no items: `item set N is empty (not
+  registered) - re-link or pick another`, and no game method is touched.
+- Game-call strategies are never built for an empty set, so the manual path
+  cannot throw either.
+- A link row whose set is empty now says
+  `item set is empty (not registered) - pick another` under the dropdown.
+- The Diagnostics test prints `items=N` so an empty target is obvious before
+  pressing anything.
+
 ## 0.1.33 — automatic restocks never call into the game again
 
 The crash log is unambiguous:

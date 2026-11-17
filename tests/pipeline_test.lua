@@ -127,12 +127,16 @@ local function rebuild_save()
         Name = "Gathering",
         _PouchItem = array({ item_work(1, 10) }),
     })
+    local set3 = object("app.savedata.cItemMySet", {
+        Name = "Empty",
+        _PouchItem = array({}),
+    })
     local item = object("app.savedata.cItemParam", {
         _PouchItem = pouch_array(world.pouch),
         _BoxItem = array(world.box),
     })
     local mysets = object("app.savedata.cItemMySetData", {
-        _Data = array({ set, set2 }),
+        _Data = array({ set, set2, set3 }),
     })
     local save = object("app.savedata.cUserSaveData", {
         _Item = item,
@@ -597,6 +601,19 @@ eq(p20[2], 3, "a missing stack is added from the box")
 eq(p20[3], 2, "and the other one too")
 eq(p20[99], nil, "the stack that is not in the set was returned")
 eq(world.apply_calls, 0, "no game method was called")
+
+-- 21) an empty (unregistered) item set is refused before any game call
+rebuild_world({ item_work(1, 5) }, { item_work(1, 9) })
+T.state.task = nil
+world.apply_calls = 0
+local ok21, why21 = T.start_task({ id = "e", label = "empty", item_set = 3 },
+    "manual")
+eq(ok21, false, "an empty item set is refused")
+eq(why21, "item set is empty", "with a clear reason")
+eq(T.state.task, nil, "no task is queued")
+eq(world.apply_calls, 0, "and nothing was called into the game")
+check(T.state.last_result:find("not registered") ~= nil,
+    "the panel says the set is not registered")
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end

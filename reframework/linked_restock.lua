@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.33"
+local VERSION = "0.1.34"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -1579,7 +1579,9 @@ end
 local function strategies_for(link, index, auto, exact)
     local list = {}
     local set_obj = item_sets()[index]
-    local may_call_game = (not auto) or exact
+    local contents = item_set_contents(index) or {}
+    -- the game's apply throws on an empty slot, and that has crashed the client
+    local may_call_game = ((not auto) or exact) and #contents > 0
 
     if not may_call_game and (link.apply_mode ~= "topup") then
         list[#list + 1] = {
@@ -1677,6 +1679,13 @@ local function start_task(link, reason, retry, exact)
     if contents == nil then
         notify("item set " .. tostring(index) .. " is missing")
         return false
+    end
+    if #contents == 0 then
+        -- an empty slot: the game's own apply throws on these (and took the
+        -- client down once), so nothing may be called for it
+        notify("item set " .. tostring(index)
+            .. " is empty (not registered) - re-link or pick another")
+        return false, "item set is empty"
     end
     local pouch, box = pouch_snapshot(), box_snapshot()
     if not world_ready() then
@@ -2589,6 +2598,12 @@ local function draw_link_row(link, i, choices, set_labels, live_sig)
 
     if choice_pos(choices, link.item_set) == nil then
         ui_text_colored("  item set missing - pick one", 0xFF8080FF)
+    else
+        local c = item_set_contents(link.item_set)
+        if c == nil or #c == 0 then
+            ui_text_colored("  item set is empty (not registered) - pick another",
+                0xFF8080FF)
+        end
     end
     local pos = labeled_dropdown("  Item set", "##set" .. i,
         choice_pos(choices, link.item_set), set_labels)
@@ -3011,6 +3026,8 @@ local function draw_ui()
                 end
 
                 parts[#parts + 1] = "free=" .. tostring(pouch_free_slots())
+                parts[#parts + 1] = "items="
+                    .. tostring(#(item_set_contents(idx) or {}))
 
                 step("apply(set)", function()
                     local m = static_method("app.ItemMySetUtil",
