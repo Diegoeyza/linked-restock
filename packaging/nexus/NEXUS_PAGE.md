@@ -2,30 +2,42 @@
 
 [b]Link an armour build to an item loadout — and keep it working when you swap weapons.[/b]
 
-[img]https://staticdelivery.nexusmods.com/images/placeholder.png[/img]
-
 [size=4]Why[/size]
-Auto Restock mods decide which item loadout to restore by matching your whole gear set, weapon included. Wilds lets you carry two weapons and swap at the tent or the Seirret — so after a mid-quest swap the weapon no longer matches the saved build and the linked item loadout silently stops being applied.
+Auto Restock mods decide which item loadout to restore by matching your whole gear set, weapon included. Wilds lets you carry two weapons and swap at the tent or the Seikret, so after a mid-quest swap the weapon no longer matches the saved build and the linked item loadout silently stops being applied.
 
-Linked Restock matches the build on [b]armour pieces + resolved skill levels + charm[/b], and only includes the weapon if you want it to. Tick [b]Ignore weapons[/b] and a weapon swap cannot break the link: same armour, same skills, any weapon.
+Linked Restock matches the build on [b]armour pieces + jewels (skills) + charm[/b], and only includes the weapon if you want it to. Tick [b]Ignore weapons[/b] and a weapon swap cannot break the link: same armour, same skills, any weapon.
 
-[size=4]Features[/size]
+[size=4]What it does[/size]
 [list]
-[*][b]Link any build to any item loadout[/b] — wear it, pick the set, press "Link current build". No need to save an in-game loadout first.
-[*][b]Ignore weapons[/b] — global checkbox plus per-link match modes: armour + skills + weapon, armour + skills, armour + charm, armour only.
-[*][b]Restock on quest accept and/or back in the hub.[/b] Quest accept is the reliable moment and the default; the hub trigger waits two seconds so the game's own return/arena flow cannot overwrite it.
-[*][b]Verified apply with fallbacks.[/b] The game's own item-set call is tried first, the pouch is read back afterwards, and the last resort is a clamped top-up from the item box. Nothing is created.
-[*][b]Preview before writing[/b] — every change ("Potion 2 -> 5") and the items the box cannot cover, named.
-[*][b]Fallbacks[/b] — per weapon type, then a default item set.
-[*][b]Export/import[/b] the link table as JSON.
+[*][b]Link any build to any item set[/b] — pick a saved armour set and an item set from two dropdowns and press [b]Link selected armour set[/b], or wear the build and press [b]Link current build[/b] to capture the weapon's roll data too.
+[*][b]One link per build[/b] — ticking a link switches off any other link that would claim the same build, so the row is unambiguous.
+[*][b]One matching switch[/b] — links always compare the most granular identity, and a single [b]Ignore weapons[/b] checkbox drops the weapon for every link at once. No per-link modes to configure twice.
+[*][b]Restock when you are back in the hub[/b] (and optionally on quest accept). The hub trigger is state-based: it waits for the quest to be over, the results and end-of-quest screens to be gone, loading to finish, and for the game itself to say you are at the hub — then holds for a few seconds before writing. A missed poll cannot swallow it.
+[*][b]Preview before writing[/b] — every change ("Potion 2 -> 5"), plus the items the item box cannot cover, named, with the reason.
+[*][b]Fallbacks[/b] — per weapon type, then a default item set, when nothing matches.
+[*][b]Export / import[/b] the link table as JSON.
+[*][b]A link list that stays out of the way[/b] — collapsed by default, scrolls, with a Find box and a "N saved, M on" header.
 [/list]
+
+[size=4]What a restock actually does[/size]
+[b]Save-data writes only. The mod never calls a game method.[/b]
+
+[list=1]
+[*]Stacks the item set does not list — and any count above the set's — are returned to the item box, which also frees pouch slots.
+[*]The pouch is topped up from the item box.
+[*]The result is verified by re-reading the pouch, and logged.
+[/list]
+
+The pouch ends up holding [b]exactly[/b] the item set, the way the item box's own apply behaves; only slot order is left to the game. Nothing is ever created: the item box is the hard limit, and anything it cannot cover is reported as [i]missing[/i] or [i]pouch full[/i].
+
+This matters: the game's item-set apply, called from a script, threw on empty sets and crashed the client twice [i]after[/i] returning success. It is not part of this mod at all, not even as a fallback.
 
 [size=4]How it works[/size]
 [list]
-[*]Gear is read from the live catalogue ([font=Courier New]app.PlayerManager:get_Catalog()[/font]) — what you are actually wearing, not what a loadout slot remembers.
-[*]Skills are the resolved levels on your hunter ([font=Courier New]cHunterSkill._EquipDataHolderRef._EquipSkillDataArray[/font]), so armour skills, decorations, set bonuses and the charm are one map.
-[*]Item loadouts come from the save data ([font=Courier New]_ItemMySet._Data[]._PouchItem[]_[/font]) with the game's own item names.
-[*]No hooks: quest state is polled twice a second. No game files are modified, no network calls, other players are never touched.
+[*]Worn gear is read from the save data ([font=Courier New]_EquipIndex.Index[/font] -> [font=Courier New]_EquipBox[/font]), i.e. what you are actually wearing — a mid-quest weapon swap is seen correctly.
+[*]Skills are captured as jewels per piece; the skill-level array on this build carries no readable levels.
+[*]Item loadouts come from [font=Courier New]_ItemMySet._Data[]._PouchItem[][/font], with the game's own item names.
+[*]No hooks: quest and camp state are polled twice a second. No game files are modified, no network calls, other players are never touched.
 [/list]
 
 [size=4]Install[/size]
@@ -40,24 +52,35 @@ MonsterHunterWilds
 
 [size=4]Usage[/size]
 [list=1]
-[*]In the hub, equip the build you want to link.
-[*]Insert -> Script Generated UI -> Linked Restock.
-[*]New link: pick the item loadout and the match mode, press [b]Link current build[/b].
-[*]Tick [b]Quest accepted[/b] and/or [b]Back in the hub[/b].
-[*]Use [b]Preview[/b] to see the exact changes, [b]Apply[/b] to try it immediately.
+[*]Insert -> Script Generated UI -> Linked Restock. Check the version in the panel title.
+[*]New link: pick a saved armour set and an item set, press [b]Link selected armour set[/b] (no need to wear it), or press [b]Link current build[/b] while wearing it.
+[*]Decide the switches: [b]Ignore weapons[/b], and the triggers [b]Quest accepted[/b] / [b]Back in the hub[/b].
+[*]Press [b]Preview[/b] to see the changes, [b]Apply now[/b] to restock immediately.
 [/list]
+
+The panel is live: it shows the worn build, which link matches, and for every link the reason it does not ("no match - differs: armour pieces, charm").
 
 [size=4]Limits[/size]
 [list]
-[*]v0.1.0: the game call that applies an item set is discovered by name and verified by reading the pouch back. If it is not found on your build, the pouch top-up path runs instead and the panel says so under Diagnostics. Run the included probe once and keep the JSON if you want the exact call confirmed.
-[*]The top-up path fills the pouch but cannot remove items the set does not list (the in-game "exact set" behaviour).
-[*]The item box is the hard limit: anything the box cannot cover is reported, never created.
+[*]Slot order inside the pouch is not rewritten — contents are exact, arrangement is the game's.
+[*]Field items (picked up in a hunt, not boxable) are not restockable; they are reported, never invented.
+[*]A build edited by hand (pieces changed without re-saving the loadout) may not match a link built from that loadout; re-link it or capture the worn build.
+[*]If the game's own camp check never matches on your install, the mod drops that check for the session and says so in the log, rather than silently not restocking.
 [/list]
 
 [size=4]Requirements[/size]
 [list]
 [*]Monster Hunter Wilds (PC)
 [*]REFramework for MH Wilds
+[/list]
+
+[size=4]Recent changes[/size]
+[list]
+[*][b]0.1.47[/b] — crash breadcrumb written as JSON (this REFramework exposes no [font=Courier New]io[/font]); camp lookup fixed; test gate against accidental Lua globals.
+[*][b]0.1.45[/b] — the hub restock asks the game whether you are at the hub, self-calibrating and self-disabling if the check never matches.
+[*][b]0.1.40[/b] — the game's item-set apply machinery was deleted from the file: no path can call it any more. Every restock is a save-data write.
+[*][b]0.1.38[/b] — every trigger logs the worn build and why each link was passed over.
+[*][b]0.1.30[/b] — dropdowns for item sets and armour sets, one switch, one link per build, collapsible link list.
 [/list]
 
 [size=4]Credits[/size]

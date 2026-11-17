@@ -1,2 +1,5 @@
 # Built release bundles (recreate with ./package.sh)
 dist/
+# Runtime breadcrumbs (the mod writes these next to the game install)
+linked_restock_trace.log
+linked_restock_trace.json

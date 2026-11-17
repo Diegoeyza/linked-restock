@@ -59,4 +59,8 @@ for test_file in tests/logic_test.lua tests/pipeline_test.lua tests/gear_test.lu
     echo "== $test_file"
     "$LUA_BIN" "$test_file" || status=1
 done
+# the mod's trace helper writes through io, which the tests do have: drop the
+# breadcrumbs it creates so the working tree stays clean
+rm -f linked_restock_trace.log linked_restock_trace.json \
+    reframework/data/linked_restock_trace.log reframework/data/linked_restock_trace.json
 exit "$status"

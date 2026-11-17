@@ -1,8 +1,8 @@
 Linked Restock
 ==============
 
-Extract this archive into your Monster Hunter Wilds game folder, so the file
-ends up here:
+Extract this archive into your Monster Hunter Wilds game folder, so the file ends
+up here:
 
     <game>\reframework\autorun\linked_restock.lua
 
@@ -16,4 +16,15 @@ Then launch the game and open:
 
     Insert -> Script Generated UI -> Linked Restock
 
-Full instructions, match modes and limits are in the mod's README.
+The panel title shows the version. After updating, use
+REFramework -> Script -> "Reset scripts" and check that title.
+
+What it does, in one line: an armour build is linked to an item loadout, and the
+pouch is restocked from the item box whenever you return to the hub (optionally on
+quest accept too). Matching ignores the weapon unless you untick "Ignore weapons".
+
+Restocks are save-data writes. The mod does not call any game method, so the
+item-set apply that has crashed other restock mods is not used at all.
+
+Settings and links: reframework\data\linked_restock.json
+Full instructions and limits: see the mod page / README.

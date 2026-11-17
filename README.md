@@ -5,10 +5,11 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.30 — verified on the live build.** The probe confirmed the
-> worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
-> and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
-> tests still have to be run once; see `docs/VERIFY.md`.
+> **Status: v0.1.47 — verified on the live build.** Restocks are save-data writes;
+> no game method is called anywhere, so the item-set apply that crashed the client
+> three times is not in the file at all. The pouch the game plays with was proven
+> to be the same array the mod writes (`ItemUtil.getItemPouch` returns the same
+> pointer). Reload the script after updating and check the title in the panel.
 
 ## The problem it solves
 
@@ -50,19 +51,20 @@ Linked Restock matches on what actually defines the build:
   seen (loading the script mid-quest counts) and fires once the game has been
   steadily out of a quest for the configured delay with
   `get_IsActiveQuest()` false, so a missed poll or the results screen cannot
-  swallow it. The panel's **Quest:** line shows which of those states you are in.
-- **Verified apply with fallbacks.** Applying by hand uses the game's own
-  item-set call first and falls back to a pouch top-up from the item box.
-  Automatic restocks use the top-up only: they write save data and never call
-  into the game, because doing that while a quest is being torn down crashed the
-  client. Nothing is created — the box is the hard limit. The target is re-read
-  before every attempt, and a failed automatic restock is re-run a few times,
-  never inside a quest.
+  swallow it. The hub trigger also asks the game whether you are actually at the
+  hub (`app.cCampManager`, reached through `GimmickManager`); that check
+  self-calibrates and drops itself for the session if it never matches, so it can
+  never silently stop restocking. The panel's **Quest:** line shows which of those
+  states you are in.
+- **Restock by save-data writes, never by calling the game.** Extras — stacks the
+  set does not list, and any count above the set's — go back to the item box, then
+  the pouch is topped up from it, then the result is verified by re-reading the
+  pouch. The game's own item-set apply is not in the mod at all: it threw on empty
+  sets and crashed the client twice *after* returning "ok". Nothing is created —
+  the box is the hard limit. A failed restock is retried a few times, never
+  inside a quest.
 - **Preview before writing.** A per-link preview lists every change
   (`Potion 2 → 5`) and names the items you are short of.
-- **A one-click game-apply test** in Diagnostics: it applies the first enabled
-  link's set through the game's own call and prints the result or the exact
-  error, which is the fastest way to diagnose a refused apply.
 - **Missing-item reporting** in the panel and, optionally, as an on-screen
   notice drawn on a dark strip so it is readable over any scene. Every shortfall
   says why: `not in the box` or `pouch full` — a stack the pouch does not carry
@@ -87,8 +89,8 @@ Linked Restock matches on what actually defines the build:
    built from the saved loadout and matches on armour pieces + charm type.
    Wearing the build and pressing **Link current build** instead captures the
    weapon's roll data, which lets the link be stricter.
-3. Leave **Match** on *inherit* to follow the global Ignore-weapons checkbox,
-   or pick a mode explicitly.
+3. Decide the two global switches: **Ignore weapons** (leave it ticked unless you
+   want the weapon to be part of the build) and the trigger checkboxes below.
 4. Tick **Quest accepted** and/or **Back in the hub**.
 5. Press **Preview** on the link to see exactly what will change, then
    **Apply** to try it immediately.
@@ -153,24 +155,24 @@ When no link matches, the weapon-type fallback runs, then the default item set.
 - Field items (things you pick up in a hunt and cannot box) are not restockable;
   the mod reports them as missing instead of inventing them.
 - A hand-edited build (pieces changed without re-saving a loadout) may not match
-  a saved loadout's link under the strict modes; use a looser mode or re-link.
+  a link built from that loadout; re-link it or capture the worn build instead.
 - The mod never writes the item box beyond what the pouch takes, never touches
   other players, never edits game files, and makes no network calls.
 
 ## Development
 
-- `tools/loadout_probe.lua` — read-only discovery probe (gear, item sets, apply
-  candidates). Run it in the hub; it writes four JSON files to
-  `reframework/data/`.
-- `tests/` — offline tests under Lua 5.1 (159 assertions):
-  - `logic_test.lua`: signature keys, match modes, link resolution,
-    diff/preview, link normalisation.
-  - `pipeline_test.lua`: the apply pipeline and trigger state machine against a
-    fake REFramework save (game apply preferred, silent-call fallback to the
-    box top-up, short box, already stocked, quest-accept/hub-return timing).
-  - `gear_test.lua`: build capture from the live catalogue and the client's
-    weapon-swap scenario end to end (strict match refuses, ignore-weapons
-    matches, re-decorated build refuses, gear mode accepts).
+- `tools/loadout_probe.lua` — read-only discovery probe (gear, item sets, save
+  layout). Not shipped; run it in the hub if a game patch changes a field.
+- `tests/` — offline tests under Lua 5.1 (271 assertions):
+  - `logic_test.lua`: signature keys, modes, link resolution, diff/preview, link
+    normalisation, dropdown key semantics.
+  - `pipeline_test.lua`: the write pipeline and trigger state machine against a
+    fake REFramework save, including the hub camp gate, retries and the
+    already-stocked no-op.
+  - `gear_test.lua`: build capture from the real save layout and the weapon-swap
+    scenario end to end.
+  - `run.sh` also compiles the mod and fails on any unexpected Lua global, because
+    a misplaced `local` is invisible to the tests but fatal in game.
 
   ```sh
   LUA=/path/to/lua5.1 ./tests/run.sh
