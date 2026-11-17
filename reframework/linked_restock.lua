@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.37"
+local VERSION = "0.1.38"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -2029,6 +2029,15 @@ local function current_weapon_type()
     return nil
 end
 
+-- The exact gear the trigger saw, on one line. Without it a fallback is
+-- indistinguishable from a match that was never linked.
+local function describe_build(sig)
+    if sig == nil then return "-" end
+    return "armour[" .. table.concat(sig.armor_ids or {}, " ") .. "]"
+        .. " charm=" .. tostring(sig.charm_id or "-")
+        .. " weapon[" .. table.concat(sig.weapon_ids or {}, " ") .. "]"
+end
+
 local function fire(reason)
     if not config.enabled then
         note("disabled, nothing fired (" .. tostring(reason) .. ")")
@@ -2041,6 +2050,21 @@ local function fire(reason)
     end
     state.last_sig = sig
     local link, mode, why = resolve_link(sig, config.links, config)
+    log.info("[LinkedRestock] build " .. describe_build(sig))
+    trace("build " .. describe_build(sig))
+    if link ~= nil then
+        log.info("[LinkedRestock] match '" .. tostring(link.label) .. "' ("
+            .. tostring(why) .. ")")
+    else
+        for _, l in ipairs(config.links or {}) do
+            if l.enabled ~= false then
+                local miss = link_mismatch(l, sig, config) or "matches"
+                log.info("[LinkedRestock] no match for '" .. tostring(l.label)
+                    .. "': " .. tostring(miss))
+                trace("nomatch " .. tostring(l.label) .. " " .. tostring(miss))
+            end
+        end
+    end
     if link == nil then
         -- fallbacks: weapon type, then default item set
         local wt = current_weapon_type()

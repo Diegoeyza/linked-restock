@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.38 — the trigger says which build it saw, and why a link was passed over
+
+0.1.35 ran a full session (23:14 → 00:08: four quests, three restocks) with **zero
+exceptions** — no access violation, no crash — which confirms the game's apply was
+the crash. What it could not answer was "why did this fall back to Base?", because
+the log only said `restocked Base (3 items)`.
+
+Now every trigger writes one line with the gear it read, plus a line per enabled
+link when none matched:
+
+```
+[LinkedRestock] build armour[armor:100:0 armor:168:3 ...] charm=charm:192 weapon[...]
+[LinkedRestock] no match for 'Agressive Conga': differs: armour pieces
+[LinkedRestock] match 'Agressive Conga' (matched (armor))
+```
+
+The same lines go to `linked_restock_trace.log` (`build …`, `nomatch …`), so the
+answer survives a crash or a relaunch.
+
 ## 0.1.37 — crash breadcrumb, always on
 
 Tracing no longer depends on **Debug log**: a crash is exactly when it must not
