@@ -373,6 +373,21 @@ eq(T.hub_gate(), false, "a quest closes the gate")
 mm.playing = false
 eq(T.hub_gate(), true, "and it opens again once nothing is in flight")
 
+-- 5f) an exact pass runs even when the pouch already matches, so the game can
+-- trim extras, and it reports a check rather than a restock
+rebuild_world({ item_work(1, 5), item_work(2, 3), item_work(3, 2) },
+    { item_work(1, 9) })
+world.apply_calls = 0
+world.on_apply = function() world.apply_calls = world.apply_calls + 1 end
+T.state.task = nil
+T.state.pending_retry = nil
+check(T.start_task(link, "back in the hub", nil, true),
+    "an exact task is created even when nothing is planned")
+check(run_task(), "and it completes")
+check(world.apply_calls >= 1, "the game call was still made")
+check(T.state.last_result:find("checked") ~= nil,
+    "the result says the set was checked, not restocked")
+
 -- 6) candidate ranking puts the item-set apply first
 local cands = T.apply_candidates()
 check(#cands >= 2, "candidates found")

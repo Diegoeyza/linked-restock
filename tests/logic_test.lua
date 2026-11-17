@@ -360,6 +360,34 @@ do
     eq(#m6, 0, "empty missing list")
 end
 
+group("compute_diff pouch capacity")
+do
+    local contents = { { id = 1, count = 2, name = "A" },
+                       { id = 9, count = 3, name = "New" } }
+    local pouch = { [1] = 2 }
+    local box = { [9] = 5 }
+
+    local ch, mi = T.compute_diff(contents, pouch, box, "exact", 0)
+    eq(#ch, 0, "a full pouch cannot take a stack it does not carry")
+    eq(#mi, 1, "and that item is reported")
+    eq(mi[1].why, "slots", "with a pouch-full reason")
+
+    local ch2, mi2 = T.compute_diff(contents, pouch, box, "exact", 1)
+    eq(#ch2, 1, "one free slot lets it be planned")
+    eq(ch2[1].id, 9, "for the item that needed a slot")
+    eq(#mi2, 0, "and nothing is missing")
+
+    local ch3, mi3 = T.compute_diff({ { id = 9, count = 3, name = "New" } },
+        {}, {}, "exact", 2)
+    eq(#ch3, 0, "no stock means no plan")
+    eq(mi3[1].why, "box", "the reason is the item box")
+
+    local ch4 = T.compute_diff({ { id = 1, count = 5, name = "A" } }, pouch,
+        { [1] = 9 }, "exact", 0)
+    eq(#ch4, 1, "raising a stack already in the pouch needs no slot")
+    eq(ch4[1].to, 5, "and plans the full count")
+end
+
 group("diff_satisfied")
 do
     local changes = { { id = 1, from = 0, to = 5 } }

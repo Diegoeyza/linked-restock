@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.26 — a full pouch is a reason, not a failure
+
+The failure dump from the last run (`linked_restock_failed_apply.json`) explained
+the "restock failed" on the HH set:
+
+```
+short: Luring Pod x1          pouch 2, set 3, item box 0
+short: item 32 x10            pouch 0, set 10, item box 254, pouch full
+```
+
+The pouch was carrying 25 stacks, so a stack it did not already hold had nowhere
+to go, and one set item is a field item the box never stocks. The mod planned
+the impossible item, retried the apply three times, and reported a failure — with
+no way to tell why.
+
+- `compute_diff` now knows how many empty pouch slots exist. A stack the pouch
+  does not carry needs one; when none is left the item is **not planned** and is
+  reported as missing with the reason `pouch full`.
+- Missing entries carry a reason: `not in the box` or `pouch full`. The preview
+  reads `cannot restock: Luring Pod x1 (not in the box), item 32 x10 (pouch
+  full)`, and the restock line names the first few.
+- An **exact** pass still runs the game's own apply even when nothing is planned
+  — that is the call that trims extras and fixes slot order — and it reports
+  `item set checked for HH` instead of claiming a restock.
+- Tests: capacity planning (full pouch, one free slot, no stock, raising an
+  existing stack) and the exact pass on an already-matching pouch.
+
 ## 0.1.25 — the fallback waits for loading to finish, and a throwing call says why
 
 Found in the live log (0.1.24):

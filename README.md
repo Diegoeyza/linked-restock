@@ -5,7 +5,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.25 — verified on the live build.** The probe confirmed the
+> **Status: v0.1.26 — verified on the live build.** The probe confirmed the
 > worn-gear source (`_EquipIndex.Index` → `_EquipBox`), the equipment categories
 > and the apply call (`app.ItemMySetUtil.applyMySetToPouch`). In-game acceptance
 > tests still have to be run once; see `docs/VERIFY.md`.
@@ -61,7 +61,9 @@ Linked Restock matches on what actually defines the build:
 - **Preview before writing.** A per-link preview lists every change
   (`Potion 2 → 5`) and names the items you are short of.
 - **Missing-item reporting** in the panel and, optionally, as an on-screen
-  notice drawn on a dark strip so it is readable over any scene.
+  notice drawn on a dark strip so it is readable over any scene. Every shortfall
+  says why: `not in the box` or `pouch full` — a stack the pouch does not carry
+  needs a free slot, and one is never invented.
 - **Fallbacks when nothing matches:** per weapon type, then a default item set.
 - **Export/import** of the link table (JSON) for backups or sharing.
 

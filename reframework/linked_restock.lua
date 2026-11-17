@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.25"
+local VERSION = "0.1.26"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -351,8 +351,13 @@ end
 
 -- What applying `contents` would change. Never returns a target the item box
 -- cannot cover: `to` is clamped by the stock in the box.
-local function compute_diff(contents, pouch, box, mode)
+-- What restocking would change. `free_slots` (optional) is how many empty pouch
+-- slots exist: a stack the pouch does not carry at all needs one, so a full
+-- pouch cannot take new items no matter what the box holds. Anything the box or
+-- the pouch cannot supply lands in `missing` with a reason.
+local function compute_diff(contents, pouch, box, mode, free_slots)
     local changes, missing = {}, {}
+    local slots = free_slots
     for _, e in ipairs(contents or {}) do
         local have = (pouch and pouch[e.id]) or 0
         local stock = (box and box[e.id]) or 0
@@ -365,6 +370,15 @@ local function compute_diff(contents, pouch, box, mode)
         else
             target = math.min(want, have + stock)
         end
+        local why = nil
+        if target > have and have == 0 and slots ~= nil then
+            if slots <= 0 then
+                target = 0
+                why = "slots"
+            else
+                slots = slots - 1
+            end
+        end
         if target ~= have then
             changes[#changes + 1] = {
                 id = e.id, name = e.name or ("item " .. tostring(e.id)),
@@ -372,9 +386,10 @@ local function compute_diff(contents, pouch, box, mode)
             }
         end
         if target < want then
+            if why == nil then why = "box" end
             missing[#missing + 1] = {
                 id = e.id, name = e.name or ("item " .. tostring(e.id)),
-                short = want - target,
+                short = want - target, why = why,
             }
         end
     end
@@ -444,6 +459,15 @@ local function snapshot(works, id_field, count_field)
         end
     end
     return map
+end
+
+local function pouch_free_slots()
+    local n = 0
+    for _, w in ipairs(pouch_works()) do
+        local id = enum_number(field_value(w, "ItemIdFixed")) or 0
+        if id == 0 then n = n + 1 end
+    end
+    return n
 end
 
 local function pouch_snapshot()
@@ -1574,7 +1598,8 @@ local function start_task(link, reason, retry, exact)
         return false, "in a quest"
     end
     local mode = (link.apply_mode == "topup") and "topup" or "exact"
-    local diff, missing = compute_diff(contents, pouch, box, mode)
+    local diff, missing = compute_diff(contents, pouch, box, mode,
+        pouch_free_slots())
     state.task = {
         link = link,
         reason = reason,
@@ -1593,11 +1618,14 @@ local function start_task(link, reason, retry, exact)
         trace = {},
         retry = retry or 0,
     }
-    if #diff == 0 then
+    if #diff == 0 and not exact then
         state.task = nil
         notify("pouch already stocked for " .. tostring(link.item_set_name or index))
         return true
     end
+    -- an exact pass runs even when nothing is planned: the game's own apply is
+    -- what trims extras and fixes slot order
+
     return true
 end
 
@@ -1653,15 +1681,19 @@ local function finish_task(ok, detail)
     if task == nil then return end
     local label = tostring(task.link.item_set_name or task.link.item_set)
     if ok then
-        local parts = { "restocked " .. label }
+        local parts
         if #task.diff > 0 then
-            parts[#parts + 1] = "(" .. tostring(#task.diff) .. " items)"
+            parts = { "restocked " .. label,
+                      "(" .. tostring(#task.diff) .. " items)" }
+        else
+            parts = { "item set checked for " .. label }
         end
         if config.notify_missing and #task.missing > 0 then
             local names = {}
             for i, m in ipairs(task.missing) do
                 if i > 3 then names[#names + 1] = "..." break end
                 names[#names + 1] = tostring(m.name)
+                    .. ((m.why == "slots") and " (pouch full)" or " (no stock)")
             end
             parts[#parts + 1] = "- missing " .. table.concat(names, ", ")
         end
@@ -1700,7 +1732,7 @@ local function tick_task()
 
     if task.phase == "run" then
         task.diff, task.missing = compute_diff(contents, pouch_snapshot(),
-            box_snapshot(), task.mode)
+            box_snapshot(), task.mode, pouch_free_slots())
         local strat = task.strategies[task.try]
         if strat == nil then
             finish_task(false, failure_detail(task))
@@ -1730,7 +1762,7 @@ local function tick_task()
     -- verify against the set, not against the trigger-time diff: success means
     -- "the pouch now holds what this item set asks for"
     local diff_now = compute_diff(contents, pouch_snapshot(), box_snapshot(),
-        task.mode)
+        task.mode, pouch_free_slots())
     task.trace[#task.trace + 1] = {
         label = task.last_label or "?", left = #diff_now,
     }
@@ -2403,7 +2435,8 @@ local function preview(link)
         return
     end
     local mode = (link.apply_mode == "topup") and "topup" or "exact"
-    local diff, missing = compute_diff(contents, pouch_snapshot(), box_snapshot(), mode)
+    local diff, missing = compute_diff(contents, pouch_snapshot(),
+        box_snapshot(), mode, pouch_free_slots())
     ui.show_preview = { link = link, diff = diff, missing = missing, mode = mode }
 end
 
@@ -2423,9 +2456,10 @@ local function draw_preview()
     if #p.missing > 0 then
         local names = {}
         for _, m in ipairs(p.missing) do
-            names[#names + 1] = tostring(m.name) .. " x" .. tostring(m.short)
+            local why = (m.why == "slots") and " (pouch full)" or " (not in the box)"
+            names[#names + 1] = tostring(m.name) .. " x" .. tostring(m.short) .. why
         end
-        ui_text_colored("not in the item box: " .. table.concat(names, ", "), 0xFF8080FF)
+        ui_text_colored("cannot restock: " .. table.concat(names, ", "), 0xFF8080FF)
     end
     if imgui.button("Apply this now##apply_preview") then
         state.dirty = true
