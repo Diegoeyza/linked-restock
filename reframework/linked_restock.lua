@@ -45,7 +45,7 @@ local os = os
 local draw = draw
 local unpack = unpack or table.unpack
 
-local VERSION = "0.1.26"
+local VERSION = "0.1.27"
 local CONFIG_FILE = "linked_restock.json"
 local LINKS_FILE = "linked_restock_links.json"
 
@@ -2885,6 +2885,36 @@ local function draw_ui()
         imgui.text("pouch slots: " .. tostring(#pouch_works())
             .. " | box slots: " .. tostring(#box_works()))
         imgui.text("apply candidates: " .. tostring(#apply_candidates()))
+        if imgui.button("Test game apply##test_apply") then
+            local target = nil
+            for _, l in ipairs(config.links) do
+                if l.enabled ~= false then target = l break end
+            end
+            local idx = target and target.item_set or config.default_item_set
+            if idx == nil then
+                notify("no link or default item set to test")
+            else
+                local typed = safe(sdk.find_type_definition, "app.ItemMySetUtil")
+                local m = typed and safe(function()
+                    return typed:get_method("applyMySetToPouch(System.Int32)")
+                end)
+                if m == nil then
+                    notify("applyMySetToPouch is not available")
+                else
+                    local parts = {}
+                    for _, base in ipairs({ idx - 1, idx }) do
+                        local ok, err = pcall(function() m:call(nil, base) end)
+                        parts[#parts + 1] = string.format("%d: %s", base,
+                            ok and "ok" or ("threw " .. tostring(err)))
+                        if not ok then
+                            log.warn("[LinkedRestock] test apply(" .. tostring(base)
+                                .. ") threw: " .. tostring(err))
+                        end
+                    end
+                    notify("game apply " .. table.concat(parts, " | "))
+                end
+            end
+        end
         if imgui.button("Dump flow API##dump_api") then
             safe(function() dump_api_impl("button") end)
             notify("wrote reframework/data/linked_restock_api.json")

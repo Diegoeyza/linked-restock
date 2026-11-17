@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.27 — a one-click game-apply test, so the failing call can speak
+
+Every previous "restock failed" left one question open: what did the game's own
+call throw? The log had `-> nil` because the error was swallowed.
+
+- **Diagnostics → Test game apply** applies the first enabled link's item set
+  through `applyMySetToPouch`, both index bases, and writes the result (or the
+  exact error) to the status line and the log at warning level. One click in the
+  hub is enough to capture why the call refuses, without waiting for a quest.
+
 ## 0.1.26 — a full pouch is a reason, not a failure
 
 The failure dump from the last run (`linked_restock_failed_apply.json`) explained
@@ -11,9 +21,11 @@ short: item 32 x10            pouch 0, set 10, item box 254, pouch full
 ```
 
 The pouch was carrying 25 stacks, so a stack it did not already hold had nowhere
-to go, and one set item is a field item the box never stocks. The mod planned
-the impossible item, retried the apply three times, and reported a failure — with
-no way to tell why.
+to go, and for one set item the box read 0 at that moment. The mod planned the
+impossible item, retried the apply three times, and reported a failure — with no
+way to tell why. (An earlier note here called that item a field item; the client
+corrected it — every item in that set is a normal, restockable item, so the real
+blocker is the game call throwing, see 0.1.27.)
 
 - `compute_diff` now knows how many empty pouch slots exist. A stack the pouch
   does not carry needs one; when none is left the item is **not planned** and is
