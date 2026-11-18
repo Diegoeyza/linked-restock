@@ -12,7 +12,7 @@ Linked Restock matches the build on [b]armour pieces + jewels (skills) + charm[/
 [*][b]Link any build to any item set[/b] — pick a saved armour set and an item set from two dropdowns and press [b]Link selected armour set[/b], or wear the build and press [b]Link current build[/b] to capture the weapon's roll data too.
 [*][b]One link per build[/b] — ticking a link switches off any other link that would claim the same build, so the row is unambiguous.
 [*][b]One matching switch[/b] — links always compare the most granular identity, and a single [b]Ignore weapons[/b] checkbox drops the weapon for every link at once. No per-link modes to configure twice.
-[*][b]Restock when you are back in the hub[/b] (and optionally on quest accept). The hub trigger is state-based: it waits for the quest to be over, the results and end-of-quest screens to be gone, loading to finish, and for the game itself to say you are at the hub — then holds for a few seconds before writing. A missed poll cannot swallow it.
+[*][b]Restock when you are back in the hub[/b] (and optionally on quest accept). The hub trigger is state-based: it waits for the quest to be over, the results and end-of-quest screens to be gone, loading to finish, and for the game to report no field stage loaded (that is the hub scene) — then holds for a few seconds before writing. A missed poll cannot swallow it.
 [*][b]Preview before writing[/b] — every change ("Potion 2 -> 5"), plus the items the item box cannot cover, named, with the reason.
 [*][b]Fallbacks[/b] — per weapon type, then a default item set, when nothing matches.
 [*][b]Export / import[/b] the link table as JSON.
@@ -65,7 +65,7 @@ The panel is live: it shows the worn build, which link matches, and for every li
 [*]Slot order inside the pouch is not rewritten — contents are exact, arrangement is the game's.
 [*]Field items (picked up in a hunt, not boxable) are not restockable; they are reported, never invented.
 [*]A build edited by hand (pieces changed without re-saving the loadout) may not match a link built from that loadout; re-link it or capture the worn build.
-[*]If the game's own camp check never matches on your install, the mod drops that check for the session and says so in the log, rather than silently not restocking.
+[*]If the hub check never matches on your install, the mod drops it for the session and says so in the log, rather than silently not restocking.
 [/list]
 
 [size=4]Requirements[/size]
@@ -76,6 +76,7 @@ The panel is live: it shows the worn build, which link matches, and for every li
 
 [size=4]Recent changes[/size]
 [list]
+[*][b]0.1.48[/b] — the hub check now uses the hub scene (no field stage loaded) instead of the camp manager, which read false at the hub.
 [*][b]0.1.47[/b] — crash breadcrumb written as JSON (this REFramework exposes no [font=Courier New]io[/font]); camp lookup fixed; test gate against accidental Lua globals.
 [*][b]0.1.45[/b] — the hub restock asks the game whether you are at the hub, self-calibrating and self-disabling if the check never matches.
 [*][b]0.1.40[/b] — the game's item-set apply machinery was deleted from the file: no path can call it any more. Every restock is a save-data write.

@@ -177,13 +177,14 @@ local pouch_helper = {
 
 -- fake MissionManager for the trigger state machine
 local mm = { playing = false, active = false, result = false, ending = false,
-             gfm_loading = false }
+             gfm_loading = false, stage = -1 }
 function mm:call(name)
     if name == "get_IsPlayingQuest" then return self.playing end
     if name == "get_IsActiveQuest" then return self.active end
     if name == "get_IsQuestResult" then return self.result end
     if name == "get_IsQuestEndShowing" then return self.ending end
     if name == "get_Loading" then return self.gfm_loading end
+    if name == "getActiveStageType" then return self.stage end
     return nil
 end
 
@@ -389,26 +390,23 @@ eq(T.hub_gate(), false, "a quest closes the gate")
 mm.playing = false
 eq(T.hub_gate(), true, "and it opens again once nothing is in flight")
 
--- 5e) the hub restock waits for a camp, once the game has shown one
-T.reset_camp_seen()
-camp_mgr.in_zone, camp_mgr.in_tent = nil, false
-eq(T.hub_gate(), true, "before any camp is seen the gate behaves as before")
+-- 5e) the hub restock waits for the hub scene, once it has been seen
+T.reset_hub_seen()
+mm.stage = 13
+eq(T.hub_gate(), true, "before the hub is seen the gate behaves as before")
 
-camp_mgr.in_zone = { id = 1 }
-eq(T.hub_gate(), true, "a camp zone opens the gate")
-eq(select(1, T.hub_camp_state()), true, "and the camp state says so")
+mm.stage = -1
+eq(T.hub_gate(), true, "no field stage means the hub, and opens the gate")
+eq(select(1, T.hub_scene_state()), true, "and the hub state says so")
 
-camp_mgr.in_zone = nil
-local okc, whyc = T.hub_gate()
-eq(okc, false, "leaving the camp closes the gate again")
-eq(whyc, "not at a camp", "and names the reason")
-eq(select(1, T.hub_camp_state()), false, "the camp state reports the same")
+mm.stage = 13
+local okh, whyh = T.hub_gate()
+eq(okh, false, "a loaded field stage closes the gate again")
+eq(whyh, "not in the hub", "and names the reason")
+eq(select(1, T.hub_scene_state()), false, "the hub state reports the same")
 
-camp_mgr.in_tent = true
-eq(T.hub_gate(), true, "being in a tent also counts as a camp")
-camp_mgr.in_tent = false
-
-T.reset_camp_seen()
+mm.stage = -1
+T.reset_hub_seen()
 eq(T.hub_gate(), true, "and the old behaviour returns if the flag is reset")
 
 -- 5f) an already matching pouch starts nothing at all

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.48 — the hub check uses the hub scene, not the camp manager
+
+Measured with 0.1.47 over three quest cycles (23:33 → 00:10): the camp manager is
+now reached correctly (`camp manager via GimmickManager.get_CampManager
+(app.cCampManager)`), but `checkIsInTent()` and `get_InZoneGimmick()` read false
+**at the hub too** — 141 flow lines, every one `tent=false zone=false`. So the camp
+check never calibrated and never gated anything: the three restocks in that
+session were unaffected.
+
+The log has a better signal:
+
+```
+hub : playing=false active=false loading=false scene=4 stage=-1   (16 lines)
+quest: playing=true  active=true  loading=false scene=8 stage=13  (56 lines)
+```
+
+`app.MissionManager.getActiveStageType()` returns **-1 when no field stage is
+loaded** — the hub scene — and a real stage id in the field. That is now the hub
+check:
+
+- enforced only after the hub has been seen once (self-calibration, as before),
+- never bypassed by the "gate stuck" fallback,
+- dropped for the session if it blocks a settled hub for ~40 s, with a log line,
+- the camp manager's `tent/zone/enable` values stay in the flow line as
+  diagnostics, but they no longer decide anything.
+
 ## 0.1.47 — the trace survives a missing `io`, and a regression is caught by the tests
 
 - **Trace without `io`.** REFramework does not expose `io` here (that is why the

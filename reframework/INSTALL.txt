@@ -1,6 +1,6 @@
 Linked Restock — REFramework mod for Monster Hunter Wilds
 =========================================================
-Version 0.1.47
+Version 0.1.48
 
 What it does
 ------------
@@ -49,8 +49,8 @@ limit, and anything it cannot cover is reported (missing / pouch full).
 Triggers
 --------
 - Back in the hub (default): waits until the quest is over, the results and
-  end-of-quest screens are gone, loading has finished, and the game itself says
-  you are at the hub/camp. Held for a few seconds before writing.
+  end-of-quest screens are gone, loading has finished, and the game reports no
+  field stage loaded (the hub scene). Held for a few seconds before writing.
 - Quest accepted (optional): waits one second so the game's own pouch setup runs
   first.
 

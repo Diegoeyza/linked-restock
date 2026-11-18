@@ -10,7 +10,7 @@ item loadout and restocks it automatically — and it keeps working when you swa
 your weapon, because the link is matched on the armour, the skills and the
 charm, not on the weapon.
 
-> **Status: v0.1.47 — verified on the live build.** Restocks are save-data writes;
+> **Status: v0.1.48 — verified on the live build.** Restocks are save-data writes;
 > no game method is called anywhere, so the item-set apply that crashed the client
 > three times is not in the file at all. The pouch the game plays with was proven
 > to be the same array the mod writes (`ItemUtil.getItemPouch` returns the same
@@ -56,11 +56,11 @@ Linked Restock matches on what actually defines the build:
   seen (loading the script mid-quest counts) and fires once the game has been
   steadily out of a quest for the configured delay with
   `get_IsActiveQuest()` false, so a missed poll or the results screen cannot
-  swallow it. The hub trigger also asks the game whether you are actually at the
-  hub (`app.cCampManager`, reached through `GimmickManager`); that check
-  self-calibrates and drops itself for the session if it never matches, so it can
-  never silently stop restocking. The panel's **Quest:** line shows which of those
-  states you are in.
+  swallow it. The hub trigger also asks the game whether you are actually in the
+  hub: `getActiveStageType()` returns -1 when no field stage is loaded, which is
+  the hub scene. That check self-calibrates and drops itself for the session if it
+  never matches, so it can never silently stop restocking. The panel's **Quest:**
+  line shows which of those states you are in.
 - **Restock by save-data writes, never by calling the game.** Extras — stacks the
   set does not list, and any count above the set's — go back to the item box, then
   the pouch is topped up from it, then the result is verified by re-reading the
