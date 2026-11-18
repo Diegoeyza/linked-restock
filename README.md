@@ -1,5 +1,10 @@
 # Linked Restock
 
+**Repository:** <https://github.com/Diegoeyza/linked-restock> ·
+[Releases](https://github.com/Diegoeyza/linked-restock/releases) ·
+[Changelog](CHANGELOG.md) ·
+[Verification checklist](docs/VERIFY.md)
+
 **A REFramework mod for Monster Hunter Wilds.** Links an armour build to an
 item loadout and restocks it automatically — and it keeps working when you swap
 your weapon, because the link is matched on the armour, the skills and the
